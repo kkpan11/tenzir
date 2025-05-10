@@ -103,6 +103,7 @@ Tenzir comes with a wide range of built-in pipeline operators.
 | [`to_clickhouse`](./operators/to_clickhouse.mdx)             | Sends events to a ClickHouse Table               | `to_clickhouse table="my_table"`                                              |
 | [`to_fluent_bit`](./operators/to_fluent_bit.mdx)             | Sends events to Fluent Bit                       | `to_fluent_bit "elasticsearch" …`                                             |
 | [`to_google_secops`](./operators/to_google_secops.md)        | Sends events to Google SecOps                    | `to_google_secops …`                                                          |
+| [`to_google_cloud_logging`](./operators/to_google_cloud_logging.md) | Sends events to Google Cloud Logging      | `to_google_cloud_logging …`                                                   |
 | [`to_hive`](./operators/to_hive.md)                          | Writes events using hive partitioning            | `to_hive "s3://…", partition_by=[x]`                                          |
 | [`to_opensearch`](./operators/to_opensearch.mdx)             | Sends incoming events to the OpenSearch Bulk API | `to_opensearch 'localhost:9200", …`                                           |
 | [`to_snowflake`](./operators/to_snowflake.md)                | Sends incoming events to a Snowflake database    | `to_snowflake account_identifier="…`                                          |
@@ -162,13 +163,13 @@ Tenzir comes with a wide range of built-in pipeline operators.
 | [`write_csv`](./operators/write_csv.md)           | Writes events as CSV                           | `write_csv`      |
 | [`write_feather`](./operators/write_feather.md)   | Writes events as Feather                       | `write_feather`  |
 | [`write_json`](./operators/write_json.md)         | Writes events as JSON                          | `write_json`     |
-| [`write_kv`](./operators/write_kv.md)             | Writes events as Key-Value pairs               | `write_kv`       |
+| [`write_kv`](./operators/write_kv.md)             | Writes events as key-value pairs               | `write_kv`       |
 | [`write_ndjson`](./operators/write_ndjson.md)     | Writes events as Newline-Delimited JSON        | `write_ndjson`   |
 | [`write_lines`](./operators/write_lines.md)       | Writes events as lines                         | `write_lines`    |
 | [`write_parquet`](./operators/write_parquet.md)   | Writes events as Parquet                       | `write_parquet`  |
 | [`write_pcap`](./operators/write_pcap.md)         | Writes events as PCAP                          | `write_pcap`     |
 | [`write_ssv`](./operators/write_ssv.md)           | Writes events as SSV                           | `write_ssv`      |
-| [`write_syslog`](./operators/write_syslog.md)     | Writes events as RFC 5424 Syslog messages      | `write_syslog`   |
+| [`write_syslog`](./operators/write_syslog.md)     | Writes events as RFC 5424 syslog messages      | `write_syslog`   |
 | [`write_tsv`](./operators/write_tsv.md)           | Writes events as TSV                           | `write_tsv`      |
 | [`write_tql`](./operators/write_tql.md)           | Writes events as TQL objects                   | `write_tql`      |
 | [`write_xsv`](./operators/write_xsv.md)           | Writes events as XSV                           | `write_xsv`      |
@@ -242,28 +243,30 @@ Tenzir comes with a wide range of built-in pipeline operators.
 | [`measure`](./operators/measure.md)     | Returns events describing the incoming batches      | `measure`                       |
 | [`remote`](./operators/remote.md)       | Forces a pipeline to run remotely at a node         | `remote { version }`            |
 | [`serve`](./operators/serve.md)         | Makes events available at `/serve`                  | `serve "abcde12345"`            |
+| [`strict`](./operators/strict.md)       | Treats all warnings as errors                       | `strict { assert false }`       |
 | [`unordered`](./operators/unordered.md) | Remove ordering assumptions in a pipeline           | `unordered { read_ndjson }`     |
 
 ## Encode & Decode
 
-| Operator                                                | Description                               | Example                   |
-| :------------------------------------------------------ | :---------------------------------------- | :------------------------ |
-| [`compress_brotli`](./operators/compress_brotli.md)     | Compresses bytes using Brotli compression | `compress_zstd, level=10` |
-| [`compress_bz2`](./operators/compress_bz2.md)           | Compresses bytes using Bzip compression   | `compress_bz2, level=9`   |
-| [`compress_gzip`](./operators/compress_gzip.md)         | Compresses bytes using Gzip compression   | `compress_gzip, level=8`  |
-| [`compress_lz4`](./operators/compress_lz4.md)           | Compresses bytes using lz4 compression    | `compress_lz4, level=7`   |
-| [`compress_zstd`](./operators/compress_zstd.md)         | Compresses bytes using Gzip compression   | `compress_zstd, level=6`  |
-| [`decompress_brotli`](./operators/decompress_brotli.md) | Decompresses Brotli compressed bytes      | `decompress_zstd`         |
-| [`decompress_bz2`](./operators/decompress_bz2.md)       | Decompresses Bzip2 compressed bytes       | `decompress_bz2`          |
-| [`decompress_gzip`](./operators/decompress_gzip.md)     | Decompresses Gzip compressed bytes        | `decompress_gzip`         |
-| [`decompress_lz4`](./operators/decompress_lz4.md)       | Decompresses lz4 compressed bytes         | `decompress_lz4`          |
-| [`decompress_zstd`](./operators/decompress_zstd.md)     | Decompresses Zstd compressed bytes        | `decompress_zstd`         |
+| Operator                                                | Description                               | Example                     |
+| :------------------------------------------------------ | :---------------------------------------- | :-------------------------- |
+| [`compress_brotli`](./operators/compress_brotli.md)     | Compresses bytes using Brotli compression | `compress_brotli, level=10` |
+| [`compress_bz2`](./operators/compress_bz2.md)           | Compresses bytes using bzip compression   | `compress_bz2, level=9`     |
+| [`compress_gzip`](./operators/compress_gzip.md)         | Compresses bytes using gzip compression   | `compress_gzip, level=8`    |
+| [`compress_lz4`](./operators/compress_lz4.md)           | Compresses bytes using lz4 compression    | `compress_lz4, level=7`     |
+| [`compress_zstd`](./operators/compress_zstd.md)         | Compresses bytes using zstd compression   | `compress_zstd, level=6`    |
+| [`decompress_brotli`](./operators/decompress_brotli.md) | Decompresses Brotli compressed bytes      | `decompress_brotli`         |
+| [`decompress_bz2`](./operators/decompress_bz2.md)       | Decompresses bzip2 compressed bytes       | `decompress_bz2`            |
+| [`decompress_gzip`](./operators/decompress_gzip.md)     | Decompresses gzip compressed bytes        | `decompress_gzip`           |
+| [`decompress_lz4`](./operators/decompress_lz4.md)       | Decompresses lz4 compressed bytes         | `decompress_lz4`            |
+| [`decompress_zstd`](./operators/decompress_zstd.md)     | Decompresses zstd compressed bytes        | `decompress_zstd`           |
 
 ## Pipelines
 
 | Operator                                         | Description             | Example         |
 | :----------------------------------------------- | :---------------------- | :-------------- |
 | [`pipeline::list`](./operators/pipeline/list.md) | Shows managed pipelines | `package::list` |
+| [`pipeline::activity`](./operators/pipeline/activity.md) | Summarizes the activity of pipelines | `package::activity range=1d, interval=1h` |
 
 ## Contexts
 

@@ -320,15 +320,16 @@ in {
       };
     in
       pkg.withPlugins (ps: [
-        ps.azure-log-analytics
         ps.compaction
         ps.context
         ps.packages
         ps.pipeline-manager
         ps.platform
         ps.to_asl
+        ps.to_azure_log_analytics
         ps.to_splunk
         ps.to_google_secops
+        ps.to_google_cloud_logging
         ps.vast
       ] ++ lib.optionals (!isStatic) [
         ps.snowflake
