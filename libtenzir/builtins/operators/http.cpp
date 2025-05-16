@@ -7,6 +7,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "tenzir/argument_parser2.hpp"
+#include "tenzir/arrow_utils.hpp"
 #include "tenzir/plugin.hpp"
 #include "tenzir/series_builder.hpp"
 
@@ -48,7 +49,7 @@ struct http_args {
     p.positional("url", url);
     p.named("server", server);
     p.named("responses", responses);
-    p.named("tls", tls);
+    p.named_optional("tls", tls);
     p.named("certfile", certfile);
     p.named("keyfile", keyfile);
     p.named("password", password);
@@ -135,12 +136,6 @@ struct http_args {
       = [&](const std::optional<located<std::string>>& opt,
             std::string_view name, bool required = false) -> failure_or<void> {
       if (opt) {
-        if (opt->inner.empty()) {
-          diagnostic::error("`{}` must not be empty", name)
-            .primary(*opt)
-            .emit(dh);
-          return failure::promise();
-        }
         if (not tls.inner and tls.source) {
           diagnostic::warning("`{}` is unused when `tls` is disabled", name)
             .primary(*opt)
@@ -148,9 +143,15 @@ struct http_args {
           return {};
         }
         tls.inner = true;
+        if (opt->inner.empty()) {
+          diagnostic::error("`{}` must not be empty", name)
+            .primary(*opt)
+            .emit(dh);
+          return failure::promise();
+        }
         return {};
       }
-      if (required) {
+      if (tls.inner and required) {
         diagnostic::error("`{}` must be set when enabling `tls`", name)
           .primary(tls.source ? tls.source : op)
           .emit(dh);
@@ -219,8 +220,7 @@ auto try_decompress_payload(const http::request& r, diagnostic_handler& dh)
   const auto codec = arrow::util::Codec::Create(
     compression_type.ValueUnsafe(), arrow::util::kUseDefaultCompressionLevel);
   TENZIR_ASSERT(codec.ok());
-  const auto decompressor
-    = codec.ValueUnsafe()->MakeDecompressor().ValueOrDie();
+  const auto decompressor = check(codec.ValueUnsafe()->MakeDecompressor());
   auto written = size_t{};
   auto read = size_t{};
   while (read != r.payload().size_bytes()) {

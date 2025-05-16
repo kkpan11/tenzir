@@ -136,12 +136,8 @@ using partition_creation_listener_actor = typed_actor_fwd<
 
 /// The CATALOG actor interface.
 using catalog_actor = typed_actor_fwd<
-  // Reinitialize the catalog from a set of partition synopses. Used at
-  // startup, so the map is expected to be huge and we use a shared_ptr
-  // to be sure it's not accidentally copied.
-  auto(atom::merge,
-       std::shared_ptr<std::unordered_map<uuid, partition_synopsis_ptr>>)
-    ->caf::result<atom::ok>,
+  // Reinitialize the catalog from a set of partition synopses.
+  auto(atom::start, std::vector<partition_synopsis_pair>)->caf::result<atom::ok>,
   // Merge a set of partition synopses.
   auto(atom::merge, std::vector<partition_synopsis_pair>)->caf::result<atom::ok>,
   // Get *ALL* partition synopses stored in the catalog, optionally filtered
@@ -343,8 +339,9 @@ struct node_actor_traits {
     auto(atom::get, atom::version)->caf::result<record>,
     // Spawn a set of execution nodes for a given pipeline. Does not start the
     // execution nodes.
-    auto(atom::spawn, operator_box, operator_type, receiver_actor<diagnostic>,
-         metrics_receiver_actor, int index, bool is_hidden, uuid run_id)
+    auto(atom::spawn, operator_box, operator_type, std::string definition,
+         receiver_actor<diagnostic>, metrics_receiver_actor, int index,
+         bool is_hidden, uuid run_id)
       ->caf::result<exec_node_actor>>;
 };
 using node_actor = caf::typed_actor<node_actor_traits>;

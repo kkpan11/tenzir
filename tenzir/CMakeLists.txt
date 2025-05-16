@@ -131,12 +131,17 @@ foreach (dir IN LISTS _integration_test_dirs)
   if (NOT IS_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/tests/${dir}")
     continue()
   endif ()
+  if ("${dir}" MATCHES "^inputs/?$")
+    continue()
+  endif ()
   add_test(
     NAME "tenzir/${dir}"
     COMMAND
       "${CMAKE_COMMAND}" "-E" "env" "--modify"
-      "PATH=path_list_prepend:$<TARGET_FILE_DIR:tenzir::tenzir>" "--" "${TENZIR_UV_PATH}"
-      "run" "${CMAKE_CURRENT_LIST_DIR}/tests/run.py" "${dir}/")
+      "PATH=path_list_prepend:$<TARGET_FILE_DIR:tenzir::tenzir>" "--"
+      "${TENZIR_UV_PATH}" "run" "--python=>=3.12"
+      "${CMAKE_CURRENT_LIST_DIR}/tests/run.py"
+      "${CMAKE_CURRENT_LIST_DIR}/tests/${dir}/")
   set_tests_properties(
     "tenzir/${dir}" PROPERTIES FIXTURES_REQUIRED
                                "tenzir_integration_test_fixture")
@@ -146,15 +151,17 @@ add_custom_target(
   integration
   COMMAND
     "${CMAKE_COMMAND}" "-E" "env" "--modify"
-    "PATH=path_list_prepend:$<TARGET_FILE_DIR:tenzir::tenzir>" "--" "${TENZIR_UV_PATH}"
-    "run" "${CMAKE_CURRENT_LIST_DIR}/tests/run.py"
+    "PATH=path_list_prepend:$<TARGET_FILE_DIR:tenzir::tenzir>" "--"
+    "${TENZIR_UV_PATH}" "run" "--python=>=3.12"
+    "${CMAKE_CURRENT_LIST_DIR}/tests/run.py"
   DEPENDS tenzir)
 add_custom_target(
   update-integration
   COMMAND
     "${CMAKE_COMMAND}" "-E" "env" "--modify"
-    "PATH=path_list_prepend:$<TARGET_FILE_DIR:tenzir::tenzir>" "--" "${TENZIR_UV_PATH}"
-    "run" "${CMAKE_CURRENT_LIST_DIR}/tests/run.py" "-u"
+    "PATH=path_list_prepend:$<TARGET_FILE_DIR:tenzir::tenzir>" "--"
+    "${TENZIR_UV_PATH}" "run" "--python=>=3.12" "--"
+    "${CMAKE_CURRENT_LIST_DIR}/tests/run.py" "--update"
   DEPENDS tenzir)
 
 add_custom_target(bats)

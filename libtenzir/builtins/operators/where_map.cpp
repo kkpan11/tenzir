@@ -248,7 +248,7 @@ private:
 
 struct arguments {
   ast::expression field;
-  ast::simple_selector capture;
+  ast::field_path capture;
   ast::expression expr;
 };
 
@@ -319,7 +319,7 @@ auto make_where_function(function_plugin::invocation inv, session ctx)
           continue;
         }
         if (predicate->array->true_count() == predicate->length()) {
-          result.push_back(field.slice(offset, values.length()));
+          result.push_back(field.slice(offset, offset + values.length()));
           continue;
         }
         auto predicate_gen = predicate->values();
@@ -366,11 +366,11 @@ struct where_result_part {
   int64_t event_count = 0;
 
   auto physical_size() const -> size_t {
-    if (slices.empty()) {
-      return 0;
+    auto sum = size_t{0};
+    for (auto& slice : slices) {
+      sum += slice.size();
     }
-    TENZIR_ASSERT(slices.size() == 1);
-    return slices.front().size();
+    return sum;
   }
 
   auto add_null() -> void {
@@ -402,11 +402,10 @@ struct where_result_part {
     }
     check(offset_builder.Append(
       offset_builder.GetValue(offset_builder.length() - 1) + n));
-    if (slices.empty()) {
+    if (slices.empty() or current_part_index != slices.back().part) {
       slices.emplace_back(current_part_index, 0, n);
       return;
     }
-    TENZIR_ASSERT(current_part_index == slices.back().part);
     slices.back().slice_end += n;
   }
 };
@@ -600,7 +599,8 @@ auto make_map_function(function_plugin::invocation inv, session ctx)
           remaining_length -= take_from_current;
           TENZIR_ASSERT(take_from_current > 0);
           merging_part.slices.emplace_back(
-            current_part_index, current_part_offset, take_from_current);
+            current_part_index, current_part_offset,
+            current_part_offset + take_from_current);
           current_part_offset += take_from_current;
           TENZIR_ASSERT(current_part_offset <= current_part_length());
           if (current_part_offset == current_part_length()) {

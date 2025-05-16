@@ -149,7 +149,8 @@ public:
               .emit(ctrl.diagnostics());
           });
       ctrl.set_waiting(true);
-      co_yield result;
+      co_yield {};
+      co_yield std::move(result);
     }
   }
 
@@ -229,12 +230,13 @@ private:
 /// An actor managing the nested pipelines of an `if` statement.
 class branch {
 public:
-  branch(branch_actor::pointer self, node_actor node,
+  branch(branch_actor::pointer self, std::string definition, node_actor node,
          shared_diagnostic_handler dh, metrics_receiver_actor metrics_receiver,
          uint64_t operator_index, ast::expression predicate_expr,
          located<pipeline> then_pipe,
          std::optional<located<pipeline>> else_pipe)
     : self_{self},
+      definition_{std::move(definition)},
       node_{std::move(node)},
       dh_{std::move(dh)},
       metrics_receiver_{std::move(metrics_receiver)},
@@ -299,7 +301,7 @@ private:
     }
     auto handle
       = self_->spawn(pipeline_executor,
-                     std::move(pipe->inner).optimize_if_closed(),
+                     std::move(pipe->inner).optimize_if_closed(), definition_,
                      receiver_actor<diagnostic>{self_},
                      metrics_receiver_actor{self_}, node_, false, false);
     ++running_branches_;
@@ -516,6 +518,8 @@ private:
 
   branch_actor::pointer self_;
 
+  std::string definition_;
+
   node_actor node_;
   shared_diagnostic_handler dh_;
   metrics_receiver_actor metrics_receiver_;
@@ -648,13 +652,13 @@ public:
     // operator in the internal-endif operator before and store it in the
     // registry as long as we do it before yielding for the first time.
     auto branch = scope_linked{ctrl.self().spawn<caf::linked>(
-      caf::actor_from_state<class branch>, ctrl.node(),
-      ctrl.shared_diagnostics(), ctrl.metrics_receiver(), ctrl.operator_index(),
-      predicate_, then_pipe_, else_pipe_)};
+      caf::actor_from_state<class branch>, std::string{ctrl.definition()},
+      ctrl.node(), ctrl.shared_diagnostics(), ctrl.metrics_receiver(),
+      ctrl.operator_index(), predicate_, then_pipe_, else_pipe_)};
     ctrl.self().system().registry().put(
       fmt::format("tenzir.branch.{}.{}", id_, ctrl.run_id()), branch.get());
     co_yield {};
-    auto output = std::optional<table_slice>{};
+    auto output = table_slice{};
     auto done = false;
     while (not done) {
       if (auto stub = input.next()) {
@@ -668,7 +672,6 @@ public:
         .then(
           [&](table_slice events) {
             ctrl.set_waiting(false);
-            TENZIR_ASSERT(not output);
             done = events.rows() == 0;
             output = std::move(events);
           },
@@ -678,16 +681,9 @@ public:
               .emit(ctrl.diagnostics());
           });
       ctrl.set_waiting(true);
-      if (not output) {
-        co_yield {};
-        continue;
-      }
-      auto result = *std::exchange(output, {});
-      co_yield std::move(result);
+      co_yield {};
+      co_yield std::move(output);
     }
-    // At the very end, we expect exactly the sentinel value here.
-    TENZIR_ASSERT(output);
-    TENZIR_ASSERT(output->rows() == 0);
   }
 
   auto location() const -> operator_location override {

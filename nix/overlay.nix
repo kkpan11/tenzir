@@ -9,6 +9,7 @@
     then package
     else package.overrideAttrs f;
 in {
+  nix2container = inputs.nix2container.packages.x86_64-linux;
   musl = overrideAttrsIf isStatic prev.musl (orig: {
     patches = (orig.patches or []) ++ [
       (prev.buildPackages.fetchpatch {
@@ -309,26 +310,30 @@ in {
   unchecked = {
     tenzir-de = final.callPackage ./tenzir {
       inherit stdenv;
-      pname = "tenzir-de";
       isReleaseBuild = inputs.isReleaseBuild.value;
     };
     # Policy: The suffix-less `tenzir' packages come with a few closed source
     # plugins.
     tenzir = let
+      tenzir-plugins-source =
+        if builtins.pathExists ./../contrib/tenzir-plugins/README.md
+          then ./../contrib/tenzir-plugins
+          else prev.callPackage ./tenzir/plugins/source.nix {};
       pkg = final.unchecked.tenzir-de.override {
-        pname = "tenzir";
+        inherit tenzir-plugins-source;
       };
     in
       pkg.withPlugins (ps: [
-        ps.azure-log-analytics
         ps.compaction
         ps.context
         ps.packages
         ps.pipeline-manager
         ps.platform
         ps.to_asl
+        ps.to_azure_log_analytics
         ps.to_splunk
         ps.to_google_secops
+        ps.to_google_cloud_logging
         ps.vast
       ] ++ lib.optionals (!isStatic) [
         ps.snowflake

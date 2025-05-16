@@ -57,18 +57,30 @@ auto tokenize_permissive(std::string_view content) -> std::vector<token> {
       ->* [] { return tk::datetime; }
     | ignore(digit >> *digit_us >> -('.' >> digit >> *digit_us) >> -identifier)
       ->* [] { return tk::scalar; }
+    | ignore("b\"" >> *(('\\' >> any) | (any - '"')) >> '"')
+      ->* [] { return tk::blob; }
+    | ignore("b\"" >> *(('\\' >> any) | (any - '"')))
+      ->* [] { return tk::error; } // non-terminated blob
     | ignore('"' >> *(('\\' >> any) | (any - '"')) >> '"')
       ->* [] { return tk::string; }
     | ignore('"' >> *(('\\' >> any) | (any - '"')))
       ->* [] { return tk::error; } // non-terminated string
+    | ignore("br\"" >> *(any - '"') >> '"')
+      ->* [] { return tk::raw_blob; }
+    | ignore("br\"" >> *(any - '"'))
+      ->* [] { return tk::error; } // non-terminated raw blob
     | ignore("r\"" >> *(any - '"') >> '"')
       ->* [] { return tk::raw_string; }
     | ignore("r\"" >> *(any - '"'))
       ->* [] { return tk::error; } // non-terminated raw string
+    | ignore("br#\"" >> *(any - "\"#") >> "\"#")
+      ->* [] { return tk::raw_blob; }
+    | ignore("br#\"" >> *(any - "\"#"))
+      ->* [] { return tk::error; } // non-terminated raw delim blob
     | ignore("r#\"" >> *(any - "\"#") >> "\"#")
       ->* [] { return tk::raw_string; }
     | ignore("r#\"" >> *(any - "\"#"))
-      ->* [] { return tk::error; } // non-terminated raw string
+      ->* [] { return tk::error; } // non-terminated raw delim string
     | ignore("//" >> *(any - '\n'))
       ->* [] { return tk::line_comment; }
     | ignore("/*" >> *(any - "*/") >> "*/")
@@ -94,6 +106,7 @@ auto tokenize_permissive(std::string_view content) -> std::vector<token> {
     | X("...", dot_dot_dot)
     | X(".?", dot_question_mark)
     | X(".", dot)
+    | X("?", question_mark)
     | X("(", lpar)
     | X(")", rpar)
     | X("{", lbrace)
@@ -119,6 +132,7 @@ auto tokenize_permissive(std::string_view content) -> std::vector<token> {
     | X("not", not_)
     | X("null", null)
     | X("or", or_)
+    | X("move", move)
     | X("this", this_)
     | X("true", true_)
 #undef X
@@ -191,6 +205,8 @@ auto describe(token_kind k) -> std::string_view {
     X(and_, "`and`");
     X(at, "@");
     X(bang_equal, "`!=`");
+    X(blob, "blob");
+    X(raw_blob, "raw blob");
     X(colon, "`:`");
     X(colon_colon, "`::`");
     X(comma, "`,`");
@@ -222,12 +238,14 @@ auto describe(token_kind k) -> std::string_view {
     X(match, "`match`");
     X(meta, "`meta`");
     X(minus, "`-`");
+    X(move, "`move`");
     X(newline, "newline");
     X(not_, "`not`");
     X(null, "`null`");
     X(or_, "`or`");
     X(pipe, "`|`");
     X(plus, "`+`");
+    X(question_mark, "`?`");
     X(raw_string, "raw string");
     X(rbrace, "`}`");
     X(rbracket, "`]`");

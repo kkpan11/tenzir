@@ -65,12 +65,13 @@ but often resort to the method style when it is more idiomatic.
 
 ## Record
 
-| Function                      | Description                         | Example                                    |
-| :---------------------------- | :---------------------------------- | :----------------------------------------- |
-| [`get`](functions/get.md)     | Accesses a field of a record        | `record.get("field with spaces", default)` |
-| [`has`](functions/has.md)     | Checks whether a record has a field | `record.has("field")`                      |
-| [`merge`](functions/merge.md) | Merges two records                  | `merge(foo, bar)`                          |
-| [`sort`](functions/sort.md)   | Sorts a record by field names       | `xs.sort()`                                |
+| Function                      | Description                         | Example                        |
+| :---------------------------- | :---------------------------------- | :----------------------------- |
+| [`get`](functions/get.md)     | Accesses a field of a record        | `record.get("field", default)` |
+| [`has`](functions/has.md)     | Checks whether a record has a field | `record.has("field")`          |
+| [`keys`](functions/keys.md)   | Gets all field names from a record  | `record.keys()`                |
+| [`merge`](functions/merge.md) | Merges two records                  | `merge(foo, bar)`              |
+| [`sort`](functions/sort.md)   | Sorts a record by field names       | `xs.sort()`                    |
 
 ## List
 
@@ -146,10 +147,10 @@ but often resort to the method style when it is more idiomatic.
 | [`parse_csv`](functions/parse_csv.mdx)       | Parses a string as CSV                   | `string.parse_csv(header=["a","b"])`               |
 | [`parse_grok`](functions/parse_grok.mdx)     | Parses a string following a grok pattern | `string.parse_grok("%{IP:client} …")`              |
 | [`parse_json`](functions/parse_json.mdx)     | Parses a string as a JSON value          | `string.parse_json()`                              |
-| [`parse_kv`](functions/parse_kv.mdx)         | Parses a string as Key-Value paris       | `string.parse_kv()`                                |
+| [`parse_kv`](functions/parse_kv.mdx)         | Parses a string as key-value pairs       | `string.parse_kv()`                                |
 | [`parse_leef`](functions/parse_leef.mdx)     | Parses a string as a LEEF message        | `string.parse_leef()`                              |
 | [`parse_ssv`](functions/parse_ssv.mdx)       | Parses a string as SSV                   | `string.parse_ssv(header=["a","b"])`               |
-| [`parse_syslog`](functions/parse_syslog.mdx) | Parses a string as a Syslog message      | `string.parse_syslog()`                            |
+| [`parse_syslog`](functions/parse_syslog.mdx) | Parses a string as a syslog message      | `string.parse_syslog()`                            |
 | [`parse_tsv`](functions/parse_tsv.mdx)       | Parses a string as TSV                   | `string.parse_tsv(header=["a","b"])`               |
 | [`parse_xsv`](functions/parse_xsv.mdx)       | Parses a string as XSV                   | `string.parse_xsv(",", ";", "", header=["a","b"])` |
 | [`parse_yaml`](functions/parse_yaml.mdx)     | Parses a string as YAML                  | `string.parse_yaml()`                              |
@@ -171,11 +172,17 @@ but often resort to the method style when it is more idiomatic.
 
 | Function                                                 | Description                                       | Example                               |
 | :------------------------------------------------------- | :------------------------------------------------ | :------------------------------------ |
-| [`as_secs`](functions/as_secs.md)                        | Converts a duration into seconds                  | `as_secs(42ms)`                       |
 | [`from_epoch`](functions/from_epoch.md)                  | Interprets a duration as Unix time                | `from_epoch(time_ms * 1ms)`           |
 | [`now`](functions/now.md)                                | Gets the current wallclock time                   | `now()`                               |
 | [`since_epoch`](functions/since_epoch.md)                | Turns a time into a duration since the Unix epoch | `since_epoch(2021-02-24)`             |
 | [`parse_time`](functions/parse_time.md)                  | Parses a timestamp following a given format       | `"10/11/2012".parse_time("%d/%m/%Y")` |
+| [`format_time`](functions/format_time.md)                | Formats a timestamp following a given format      | `ts.format_time("%d/%m/%Y")`          |
+| [`year`](functions/year.md)                              | Extracts the year component from a timestamp      | `ts.year()`                           |
+| [`month`](functions/month.md)                            | Extracts the month component from a timestamp     | `ts.month()`                          |
+| [`day`](functions/day.md)                                | Extracts the day component from a timestamp       | `ts.day()`                            |
+| [`hour`](functions/hour.md)                              | Extracts the hour component from a timestamp      | `ts.hour()`                           |
+| [`minute`](functions/minute.md)                          | Extracts the minute component from a timestamp    | `ts.minute()`                         |
+| [`second`](functions/second.md)                          | Extracts the second component from a timestamp    | `ts.second()`                         |
 | [`years`](functions/years.mdx)                           | Converts a number to equivalent years             | `years(100)`                          |
 | [`months`](functions/months.mdx)                         | Converts a number to equivalent months            | `months(100)`                         |
 | [`weeks`](functions/weeks.mdx)                           | Converts a number to equivalent weeks             | `weeks(100)`                          |
@@ -196,24 +203,6 @@ but often resort to the method style when it is more idiomatic.
 | [`count_milliseconds`](functions/count_milliseconds.mdx) | Counts the number of milliseconds in a duration   | `count_milliseconds(100d)`            |
 | [`count_microseconds`](functions/count_microseconds.mdx) | Counts the number of microseconds in a duration   | `count_microseconds(100d)`            |
 | [`count_nanoseconds`](functions/count_nanoseconds.mdx)   | Counts the number of nanoseconds in a duration    | `count_nanoseconds(100d)`             |
-
-<!--
-This is hidden because there is an issue with the timezone DB.
-[`format_time`](functions/format_time.md) | Format a timestamp following a given format | `2012-11-10.format_time("%d/%m/%Y")`
--->
-
-<!--
-
-- `year`
-- `month`
-- `week` (?)
-- `day`
-- `hour`
-- `minute`
-- `second`
-- `tz` (?)
-
--->
 
 ## Math
 
@@ -260,17 +249,19 @@ This is hidden because there is an issue with the timezone DB.
 
 ## Encoding
 
-| function                                      | description                                       | example                   |
-| :-------------------------------------------- | :------------------------------------------------ | :------------------------ |
-| [`encode_base64`](functions/encode_base64.md) | Encodes bytes as Base64                           | `encode_base64("Tenzir")` |
-| [`encode_hex`](functions/encode_hex.md)       | Encodes bytes as their hexadecimal representation | `encode_hex("Tenzir")`    |
+| function                                      | description                                       | example                     |
+| :-------------------------------------------- | :------------------------------------------------ | :-------------------------- |
+| [`encode_base64`](functions/encode_base64.md) | Encodes bytes as Base64                           | `encode_base64("Tenzir")`   |
+| [`encode_hex`](functions/encode_hex.md)       | Encodes bytes as their hexadecimal representation | `encode_hex("Tenzir")`      |
+| [`encode_url`](functions/encode_url.md)       | Encodes strings using URL encoding                | `encode_url("Hello World")` |
 
 ## Decoding
 
-| function                                      | description                                         | example                     |
-| :-------------------------------------------- | :-------------------------------------------------- | :-------------------------- |
-| [`decode_base64`](functions/decode_base64.md) | Decodes bytes as Base64                             | `decode_base64("VGVuemly")` |
-| [`decode_hex`](functions/decode_hex.md)       | Decodes bytes from their hexadecimal representation | `decode_hex("4e6f6E6365")`  |
+| function                                      | description                                         | example                       |
+| :-------------------------------------------- | :-------------------------------------------------- | :---------------------------- |
+| [`decode_base64`](functions/decode_base64.md) | Decodes bytes as Base64                             | `decode_base64("VGVuemly")`   |
+| [`decode_hex`](functions/decode_hex.md)       | Decodes bytes from their hexadecimal representation | `decode_hex("4e6f6E6365")`    |
+| [`decode_url`](functions/decode_url.md)       | Decodes URL encoded strings                         | `decode_url("Hello%20World")` |
 
 ## Type System
 
@@ -279,7 +270,7 @@ This is hidden because there is an issue with the timezone DB.
 | Function                          | Description                                    | Example            |
 | :-------------------------------- | :--------------------------------------------- | :----------------- |
 | [`type_id`](functions/type_id.md) | Retrieves the type id of an expression         | `type_id(1 + 3.2)` |
-| [`type_of`](functions/type_id.md) | Retrieves the type definition of an expression | `type_id(this)`    |
+| [`type_of`](functions/type_of.md) | Retrieves the type definition of an expression | `type_of(this)`    |
 
 ### Conversion
 
@@ -303,8 +294,8 @@ This is hidden because there is an issue with the timezone DB.
 
 ## Runtime
 
-| Function                        | Description                   | Example          |
-| :------------------------------ | :---------------------------- | :--------------- |
-| [`config`](functions/config.md) | Reads the configuration file  | `config()`       |
-| [`env`](functions/env.md)       | Reads an environment variable | `env("PATH")`    |
-| [`secret`](functions/secret.md) | Reads a secret from a store   | `secret("PATH")` |
+| Function                        | Description                   | Example         |
+| :------------------------------ | :---------------------------- | :-------------- |
+| [`config`](functions/config.md) | Reads the configuration file  | `config()`      |
+| [`env`](functions/env.md)       | Reads an environment variable | `env("PATH")`   |
+| [`secret`](functions/secret.md) | Reads a secret from a store   | `secret("KEY")` |

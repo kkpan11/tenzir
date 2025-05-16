@@ -92,31 +92,6 @@ teardown() {
       | drop timestamp
       | hash --salt=\"abcdefghij12\" flow_id
       | drop flow_id"
-  check tenzir "export
-      | select timestamp, flow_id, src_ip, dest_ip, src_port
-      | sort timestamp
-      | drop timestamp
-      | hash --salt=\"abcdefghij12\" flow_id
-      | drop flow_id
-      | pseudonymize -m \"crypto-pan\" -s \"123456abcdef\" src_ip, dest_ip"
-  check tenzir "export
-      | select timestamp, flow_id, src_ip, dest_ip, src_port
-      | sort timestamp
-      | drop timestamp
-      | hash --salt=\"abcdefghij12\" flow_id
-      | drop flow_id
-      | pseudonymize -m \"crypto-pan\" -s \"123456abcdef\" src_ip, dest_ip
-      | rename source_ip=src_ip"
-  check tenzir "export
-      | select timestamp, flow_id, src_ip, dest_ip, src_port
-      | sort timestamp
-      | drop timestamp
-      | hash --salt=\"abcdefghij12\" flow_id
-      | drop flow_id
-      | pseudonymize -m \"crypto-pan\" -s \"123456abcdef\" src_ip, dest_ip
-      | rename source_ip=src_ip
-      | where #schema
-==\"suricata.alert\" || #schema == \"suricata.fileinfo\""
 }
 
 # bats test_tags=server,client,import,export,transforms
@@ -156,55 +131,6 @@ teardown() {
       | drop timestamp
       | hash --salt="abcdefghij12" flow_id
       | drop flow_id'
-  check tenzir 'export
-      | where src_ip==147.32.84.165 && (src_port==1181 || src_port == 138)
-      | sort timestamp
-      | pass
-      | select timestamp, flow_id, src_ip, dest_ip, src_port
-      | drop timestamp
-      | hash --salt="abcdefghij12" flow_id
-      | drop flow_id
-      | pseudonymize -m "crypto-pan" -s "123456abcdef" src_ip, dest_ip'
-  check tenzir 'export
-      | where src_ip==147.32.84.165 && (src_port==1181 || src_port == 138)
-      | sort timestamp
-      | pass
-      | select timestamp, flow_id, src_ip, dest_ip, src_port
-      | drop timestamp
-      | hash --salt="abcdefghij12" flow_id
-      | drop flow_id
-      | pseudonymize -m "crypto-pan" -s "123456abcdef" src_ip, dest_ip'
-  check tenzir 'export
-      | where src_ip==147.32.84.165 && (src_port==1181 || src_port == 138)
-      | sort timestamp
-      | pass
-      | select timestamp, flow_id, src_ip, dest_ip, src_port
-      | drop timestamp
-      | hash --salt="abcdefghij12" flow_id
-      | drop flow_id
-      | pseudonymize -m "crypto-pan" -s "123456abcdef" src_ip, dest_ip
-      | rename source_ip=src_ip'
-  check tenzir 'export
-      | where src_ip==147.32.84.165 && (src_port==1181 || src_port == 138)
-      | sort timestamp
-      | pass
-      | select timestamp, flow_id, src_ip, dest_ip, src_port
-      | drop timestamp
-      | hash --salt="abcdefghij12" flow_id
-      | drop flow_id
-      | pseudonymize -m "crypto-pan" -s "123456abcdef" src_ip, dest_ip
-      | rename source_ip=src_ip'
-  check tenzir 'export
-      | where src_ip==147.32.84.165 && (src_port==1181 || src_port == 138)
-      | sort timestamp
-      | pass
-      | select timestamp, flow_id, src_ip, dest_ip, src_port
-      | drop timestamp
-      | hash --salt="abcdefghij12" flow_id
-      | drop flow_id
-      | pseudonymize -m "crypto-pan" -s "123456abcdef" src_ip, dest_ip
-      | rename source_ip=src_ip
-      | where #schema =="suricata.alert" || #schema == "suricata.fileinfo"'
 }
 
 # bats test_tags=import,export
@@ -263,7 +189,7 @@ teardown() {
   TENZIR_EXAMPLE_YAML="$(dirname "$BATS_TEST_DIRNAME")/../../tenzir.yaml.example"
 
   check tenzir "from file ${TENZIR_EXAMPLE_YAML} read yaml | put plugins=tenzir.plugins, commands=tenzir.start.commands"
-  TENZIR_LEGACY=false check tenzir 'from config() | drop tenzir.cacert, tenzir["cache-directory"], tenzir["state-directory"], tenzir.endpoint | write_yaml'
+  TENZIR_LEGACY=false check tenzir 'from config() | drop tenzir.cacert?, tenzir["cache-directory"]?, tenzir["runtime-prefix"]?, tenzir["state-directory"]?, tenzir.endpoint | write_yaml'
   check tenzir "from file ${INPUTSDIR}/zeek/zeek.json read zeek-json | head 5 | write yaml"
   check tenzir 'plugins | where name == "yaml" | repeat 10 | write yaml | read yaml'
 }
