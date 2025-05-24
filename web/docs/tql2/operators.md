@@ -6,15 +6,16 @@ Tenzir comes with a wide range of built-in pipeline operators.
 
 ## Modify
 
-| Operator                                | Description                                                     | Example                          |
-| :-------------------------------------- | :-------------------------------------------------------------- | :------------------------------- |
-| [`set`](./operators/set.md)             | Assigns a value to a field, creating it if necessary            | `name = "Tenzir"`                |
-| [`select`](./operators/select.md)       | Selects some values and discard the rest                        | `select name, id=metadata.id`    |
-| [`drop`](./operators/drop.md)           | Removes fields from the event                                   | `drop name, metadata.id`         |
-| [`enumerate`](./operators/enumerate.md) | Adds a field with the number of the event                       | `enumerate num`                  |
+| Operator                                | Description                                                     | Example                                          |
+| :-------------------------------------- | :-------------------------------------------------------------- | :----------------------------------------------- |
+| [`set`](./operators/set.md)             | Assigns a value to a field, creating it if necessary            | `name = "Tenzir"`                                |
+| [`select`](./operators/select.md)       | Selects some values and discard the rest                        | `select name, id=metadata.id`                    |
+| [`drop`](./operators/drop.md)           | Removes fields from the event                                   | `drop name, metadata.id`                         |
+| [`enumerate`](./operators/enumerate.md) | Adds a field with the number of the event                       | `enumerate num`                                  |
+| [`http`](./operators/http.md)           | Sends HTTP/1.1 requests per event and forwards response         | `http "example.com"`                             |
 | [`move`](./operators/move.md)           | Moves a field to another                                        | `move id=parsed_id, ctx.message=incoming.status` |
-| [`timeshift`](./operators/timeshift.md) | Adjusts timestamps relative to a given start time               | `timeshift ts, start=2020-01-01` |
-| [`unroll`](./operators/unroll.md)       | Unrolls a field of type list, duplicating the surrounding event | `unroll names`                   |
+| [`timeshift`](./operators/timeshift.md) | Adjusts timestamps relative to a given start time               | `timeshift ts, start=2020-01-01`                 |
+| [`unroll`](./operators/unroll.md)       | Unrolls a field of type list, duplicating the surrounding event | `unroll names`                                   |
 
 ## Filter
 
@@ -66,6 +67,7 @@ Tenzir comes with a wide range of built-in pipeline operators.
 | Operator                                             | Description                                              | Example                                                                                                    |
 | :--------------------------------------------------- | :------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------- |
 | [`from`](./operators/from.md)                        | Reads events from an URI<br/>Creates events from records | `from "http://example.org/file.csv.gz"`<br/>`from {key: "value"}…` <!--at the top because its important--> |
+| [`from_file`](./operators/from_file.md)                        | Reads one or multiple files from a filesystem | `from_file "s3://data/**.json"` |
 | [`from_http`](./operators/from_http.md)              | Accepts or sends HTTP/1.1 requests                       | `from_http "0.0.0.0:8080`                                                                                  |
 | [`from_fluent_bit`](./operators/from_fluent_bit.mdx) | Returns results from Fluent Bit                          | `from_fluent_bit "opentelemetry"`                                                                          |
 | [`from_opensearch`](./operators/from_opensearch.md)  | Accepts requests for OpenSearch Bulk API                 | `from_opensearch`                                                                                          |
@@ -95,18 +97,19 @@ Tenzir comes with a wide range of built-in pipeline operators.
 
 #### Events
 
-| Operator                                                     | Description                                      | Example                                                                       |
-| :----------------------------------------------------------- | :----------------------------------------------- | :---------------------------------------------------------------------------- |
-| [`to`](./operators/to.md)                                    | Writes events to an URI                          | `to "s3://examplebucket/obj.json.gz"` <!--at the top because its important--> |
-| [`to_asl`](./operators/to_asl.md)                            | Sends OCSF events to an Amazon Security Lake     | `to_asl "s3://…"`                                                             |
-| [`to_azure_log_ana…`](./operators/to_azure_log_analytics.md) | Sends events to Azure Log Analytics              | `to_azure_log_analytics tenant_id=…`                                          |
-| [`to_clickhouse`](./operators/to_clickhouse.mdx)             | Sends events to a ClickHouse Table               | `to_clickhouse table="my_table"`                                              |
-| [`to_fluent_bit`](./operators/to_fluent_bit.mdx)             | Sends events to Fluent Bit                       | `to_fluent_bit "elasticsearch" …`                                             |
-| [`to_google_secops`](./operators/to_google_secops.md)        | Sends events to Google SecOps                    | `to_google_secops …`                                                          |
-| [`to_hive`](./operators/to_hive.md)                          | Writes events using hive partitioning            | `to_hive "s3://…", partition_by=[x]`                                          |
-| [`to_opensearch`](./operators/to_opensearch.mdx)             | Sends incoming events to the OpenSearch Bulk API | `to_opensearch 'localhost:9200", …`                                           |
-| [`to_snowflake`](./operators/to_snowflake.md)                | Sends incoming events to a Snowflake database    | `to_snowflake account_identifier="…`                                          |
-| [`to_splunk`](./operators/to_splunk.mdx)                     | Sends incoming events to a Splunk HEC            | `to_splunk "localhost:8088", …`                                               |
+| Operator                                                            | Description                                      | Example                                                                       |
+| :------------------------------------------------------------------ | :----------------------------------------------- | :---------------------------------------------------------------------------- |
+| [`to`](./operators/to.md)                                           | Writes events to an URI                          | `to "s3://examplebucket/obj.json.gz"` <!--at the top because its important--> |
+| [`to_asl`](./operators/to_asl.md)                                   | Sends OCSF events to an Amazon Security Lake     | `to_asl "s3://…"`                                                             |
+| [`to_azure_log_ana…`](./operators/to_azure_log_analytics.md)        | Sends events to Azure Log Analytics              | `to_azure_log_analytics tenant_id=…`                                          |
+| [`to_clickhouse`](./operators/to_clickhouse.mdx)                    | Sends events to a ClickHouse Table               | `to_clickhouse table="my_table"`                                              |
+| [`to_fluent_bit`](./operators/to_fluent_bit.mdx)                    | Sends events to Fluent Bit                       | `to_fluent_bit "elasticsearch" …`                                             |
+| [`to_google_secops`](./operators/to_google_secops.md)               | Sends events to Google SecOps                    | `to_google_secops …`                                                          |
+| [`to_google_cloud_logging`](./operators/to_google_cloud_logging.md) | Sends events to Google Cloud Logging             | `to_google_cloud_logging …`                                                   |
+| [`to_hive`](./operators/to_hive.md)                                 | Writes events using hive partitioning            | `to_hive "s3://…", partition_by=[x]`                                          |
+| [`to_opensearch`](./operators/to_opensearch.mdx)                    | Sends incoming events to the OpenSearch Bulk API | `to_opensearch 'localhost:9200", …`                                           |
+| [`to_snowflake`](./operators/to_snowflake.md)                       | Sends incoming events to a Snowflake database    | `to_snowflake account_identifier="…`                                          |
+| [`to_splunk`](./operators/to_splunk.mdx)                            | Sends incoming events to a Splunk HEC            | `to_splunk "localhost:8088", …`                                               |
 
 #### Bytes
 
@@ -162,13 +165,13 @@ Tenzir comes with a wide range of built-in pipeline operators.
 | [`write_csv`](./operators/write_csv.md)           | Writes events as CSV                           | `write_csv`      |
 | [`write_feather`](./operators/write_feather.md)   | Writes events as Feather                       | `write_feather`  |
 | [`write_json`](./operators/write_json.md)         | Writes events as JSON                          | `write_json`     |
-| [`write_kv`](./operators/write_kv.md)             | Writes events as Key-Value pairs               | `write_kv`       |
+| [`write_kv`](./operators/write_kv.md)             | Writes events as key-value pairs               | `write_kv`       |
 | [`write_ndjson`](./operators/write_ndjson.md)     | Writes events as Newline-Delimited JSON        | `write_ndjson`   |
 | [`write_lines`](./operators/write_lines.md)       | Writes events as lines                         | `write_lines`    |
 | [`write_parquet`](./operators/write_parquet.md)   | Writes events as Parquet                       | `write_parquet`  |
 | [`write_pcap`](./operators/write_pcap.md)         | Writes events as PCAP                          | `write_pcap`     |
 | [`write_ssv`](./operators/write_ssv.md)           | Writes events as SSV                           | `write_ssv`      |
-| [`write_syslog`](./operators/write_syslog.md)     | Writes events as RFC 5424 Syslog messages      | `write_syslog`   |
+| [`write_syslog`](./operators/write_syslog.md)     | Writes events as RFC 5424 syslog messages      | `write_syslog`   |
 | [`write_tsv`](./operators/write_tsv.md)           | Writes events as TSV                           | `write_tsv`      |
 | [`write_tql`](./operators/write_tql.md)           | Writes events as TQL objects                   | `write_tql`      |
 | [`write_xsv`](./operators/write_xsv.md)           | Writes events as XSV                           | `write_xsv`      |
@@ -231,39 +234,42 @@ Tenzir comes with a wide range of built-in pipeline operators.
 
 ## Internals
 
-| Operator                                | Description                                         | Example                         |
-| :-------------------------------------- | :-------------------------------------------------- | :------------------------------ |
-| [`api`](./operators/api.md)             | Calls Tenzir's REST API from a pipeline             | `api "/pipeline/list"`          |
-| [`batch`](./operators/batch.md)         | Controls the batch size of events                   | `batch timeout=1s`              |
-| [`buffer`](./operators/buffer.md)       | Adds additional buffering to handle spikes          | `buffer 10M, policy="drop"`     |
-| [`cache`](./operators/cache.md)         | In-memory cache shared between pipelines            | `cache "w01wyhTZm3", ttl=10min` |
-| [`legacy`](./operators/legacy.md)       | Provides a compatibility fallback to TQL1 pipelines | `legacy "chart area"`           |
-| [`local`](./operators/local.md)         | Forces a pipeline to run locally                    | `local { sort foo }`            |
-| [`measure`](./operators/measure.md)     | Returns events describing the incoming batches      | `measure`                       |
-| [`remote`](./operators/remote.md)       | Forces a pipeline to run remotely at a node         | `remote { version }`            |
-| [`serve`](./operators/serve.md)         | Makes events available at `/serve`                  | `serve "abcde12345"`            |
-| [`unordered`](./operators/unordered.md) | Remove ordering assumptions in a pipeline           | `unordered { read_ndjson }`     |
+| Operator                                        | Description                                         | Example                         |
+| :---------------------------------------------- | :-------------------------------------------------- | :------------------------------ |
+| [`api`](./operators/api.md)                     | Calls Tenzir's REST API from a pipeline             | `api "/pipeline/list"`          |
+| [`assert_secret`](./operators/assert_secret.md) | Checks a secret against an expected value           | `assert_secret secret=…`        |
+| [`batch`](./operators/batch.md)                 | Controls the batch size of events                   | `batch timeout=1s`              |
+| [`buffer`](./operators/buffer.md)               | Adds additional buffering to handle spikes          | `buffer 10M, policy="drop"`     |
+| [`cache`](./operators/cache.md)                 | In-memory cache shared between pipelines            | `cache "w01wyhTZm3", ttl=10min` |
+| [`legacy`](./operators/legacy.md)               | Provides a compatibility fallback to TQL1 pipelines | `legacy "chart area"`           |
+| [`local`](./operators/local.md)                 | Forces a pipeline to run locally                    | `local { sort foo }`            |
+| [`measure`](./operators/measure.md)             | Returns events describing the incoming batches      | `measure`                       |
+| [`remote`](./operators/remote.md)               | Forces a pipeline to run remotely at a node         | `remote { version }`            |
+| [`serve`](./operators/serve.md)                 | Makes events available at `/serve`                  | `serve "abcde12345"`            |
+| [`strict`](./operators/strict.md)               | Treats all warnings as errors                       | `strict { assert false }`       |
+| [`unordered`](./operators/unordered.md)         | Remove ordering assumptions in a pipeline           | `unordered { read_ndjson }`     |
 
 ## Encode & Decode
 
-| Operator                                                | Description                               | Example                   |
-| :------------------------------------------------------ | :---------------------------------------- | :------------------------ |
-| [`compress_brotli`](./operators/compress_brotli.md)     | Compresses bytes using Brotli compression | `compress_zstd, level=10` |
-| [`compress_bz2`](./operators/compress_bz2.md)           | Compresses bytes using Bzip compression   | `compress_bz2, level=9`   |
-| [`compress_gzip`](./operators/compress_gzip.md)         | Compresses bytes using Gzip compression   | `compress_gzip, level=8`  |
-| [`compress_lz4`](./operators/compress_lz4.md)           | Compresses bytes using lz4 compression    | `compress_lz4, level=7`   |
-| [`compress_zstd`](./operators/compress_zstd.md)         | Compresses bytes using Gzip compression   | `compress_zstd, level=6`  |
-| [`decompress_brotli`](./operators/decompress_brotli.md) | Decompresses Brotli compressed bytes      | `decompress_zstd`         |
-| [`decompress_bz2`](./operators/decompress_bz2.md)       | Decompresses Bzip2 compressed bytes       | `decompress_bz2`          |
-| [`decompress_gzip`](./operators/decompress_gzip.md)     | Decompresses Gzip compressed bytes        | `decompress_gzip`         |
-| [`decompress_lz4`](./operators/decompress_lz4.md)       | Decompresses lz4 compressed bytes         | `decompress_lz4`          |
-| [`decompress_zstd`](./operators/decompress_zstd.md)     | Decompresses Zstd compressed bytes        | `decompress_zstd`         |
+| Operator                                                | Description                               | Example                     |
+| :------------------------------------------------------ | :---------------------------------------- | :-------------------------- |
+| [`compress_brotli`](./operators/compress_brotli.md)     | Compresses bytes using Brotli compression | `compress_brotli, level=10` |
+| [`compress_bz2`](./operators/compress_bz2.md)           | Compresses bytes using bzip compression   | `compress_bz2, level=9`     |
+| [`compress_gzip`](./operators/compress_gzip.md)         | Compresses bytes using gzip compression   | `compress_gzip, level=8`    |
+| [`compress_lz4`](./operators/compress_lz4.md)           | Compresses bytes using lz4 compression    | `compress_lz4, level=7`     |
+| [`compress_zstd`](./operators/compress_zstd.md)         | Compresses bytes using zstd compression   | `compress_zstd, level=6`    |
+| [`decompress_brotli`](./operators/decompress_brotli.md) | Decompresses Brotli compressed bytes      | `decompress_brotli`         |
+| [`decompress_bz2`](./operators/decompress_bz2.md)       | Decompresses bzip2 compressed bytes       | `decompress_bz2`            |
+| [`decompress_gzip`](./operators/decompress_gzip.md)     | Decompresses gzip compressed bytes        | `decompress_gzip`           |
+| [`decompress_lz4`](./operators/decompress_lz4.md)       | Decompresses lz4 compressed bytes         | `decompress_lz4`            |
+| [`decompress_zstd`](./operators/decompress_zstd.md)     | Decompresses zstd compressed bytes        | `decompress_zstd`           |
 
 ## Pipelines
 
-| Operator                                         | Description             | Example         |
-| :----------------------------------------------- | :---------------------- | :-------------- |
-| [`pipeline::list`](./operators/pipeline/list.md) | Shows managed pipelines | `package::list` |
+| Operator                                                 | Description                          | Example                                   |
+| :------------------------------------------------------- | :----------------------------------- | :---------------------------------------- |
+| [`pipeline::list`](./operators/pipeline/list.md)         | Shows managed pipelines              | `package::list`                           |
+| [`pipeline::activity`](./operators/pipeline/activity.md) | Summarizes the activity of pipelines | `package::activity range=1d, interval=1h` |
 
 ## Contexts
 
