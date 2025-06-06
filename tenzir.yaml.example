@@ -196,6 +196,12 @@ tenzir:
   # Setting this to `true` is strongly discouraged.
   platform-skip-peer-verification: false
 
+  # The name to use when connecting to the platform as an ephemeral node.
+  # This setting is ignored unless a workspace token is used to connect to
+  # the platform. Workspace tokens are currently only available for the
+  # Sovereign Edition of the Tenzir Platform.
+  platform-ephemeral-node-name: Ephemeral Node
+
   # Control how operator's calculate demand from their upstream operator. Note
   # that this is an expert feature and should only be changed if you know what
   # you are doing. The configured values can also be changed per operator by
@@ -313,21 +319,21 @@ tenzir:
     # The Zeek operator is an example that takes raw bytes in the form of a
     # PCAP and then parses Zeek's output via the `zeek-json` format to generate
     # a stream of events.
-    zeek:
+    zeek: |
       shell "zeek -r - LogAscii::output_to_stdout=T
              JSONStreaming::disable_default_logs=T
              JSONStreaming::enable_log_rotation=F
              json-streaming-logs"
-      | read zeek-json
+      read_zeek_json
     # The Suricata operator is analogous to the above Zeek example, with the
     # difference that we are using Suricata. The commmand line configures
     # Suricata such that it reads PCAP on stdin and produces EVE JSON logs on
     # stdout, which we then parse with the `suricata` format.
-    suricata:
+    suricata: |
      shell "suricata -r /dev/stdin
             --set outputs.1.eve-log.filename=/dev/stdout
             --set logging.outputs.0.console.enabled=no"
-     | read suricata
+     read_suricata
 
   # In addition to running pipelines interactively, you can also deploy
   # *Pipelines as Code*. This infrastrucutre-as-code-like method differs from
@@ -344,9 +350,9 @@ tenzir:
       # The definition of the pipeline. Configured pipelines that fail to start
       # cause the node to fail to start.
       definition: |
-        from tcp://0.0.0.0:34343 read suricata --no-infer
+        load_tcp "0.0.0.0:34343" { read_suricata schema_only=true }
         | where event_type != "stats"
-        | publish suricata
+        | publish "suricata"
       # Pipelines that encounter an error stop running and show an error state.
       # This option causes pipelines to automatically restart when they
       # encounter an error instead. The first restart happens immediately, and
@@ -362,6 +368,21 @@ tenzir:
       # If `restart-on-error` is enabled, they will restart after the specified
       # duration.
       unstoppable: false
+
+  # Use the legacy secret model. Under this model, the `secret` function yields
+  # plain `string`s and can only look up secrets from the `tenzir.secrets`
+  # section in this config, but not from the Tenzir Platform's secret store.
+  legacy-secret-model: false
+
+  # Enables the `secret_assert` operator. This operator can be used for our
+  # integration tests and may be useful to test local setups.
+  # Since it theoretically allows for brute-forcing a secret's value, it is
+  # disabled by default.
+  enable-assert-secret-operator: false
+
+  # Local secrets, defined as key - value pairs. The values must be strings
+  secrets:
+    # my-secret-name: my-secret-value
 
 
 # The below settings are internal to CAF, and aren't checked by Tenzir directly.

@@ -9,15 +9,19 @@
 #include "tenzir/execution_node.hpp"
 
 #include "tenzir/actors.hpp"
-#include "tenzir/arrow_utils.hpp"
 #include "tenzir/chunk.hpp"
+#include "tenzir/connect_to_node.hpp"
 #include "tenzir/defaults.hpp"
+#include "tenzir/detail/base64.hpp"
+#include "tenzir/detail/fanout_counter.hpp"
 #include "tenzir/detail/scope_guard.hpp"
 #include "tenzir/detail/weak_handle.hpp"
-#include "tenzir/detail/weak_run_delayed.hpp"
 #include "tenzir/diagnostics.hpp"
+#include "tenzir/ecc.hpp"
 #include "tenzir/metric_handler.hpp"
 #include "tenzir/operator_control_plane.hpp"
+#include "tenzir/secret_resolution.hpp"
+#include "tenzir/secret_store.hpp"
 #include "tenzir/si_literals.hpp"
 #include "tenzir/table_slice.hpp"
 
@@ -36,6 +40,21 @@
 namespace tenzir {
 
 namespace {
+
+template <class F>
+void loop_at(caf::scheduled_actor* self, caf::actor_clock::time_point start,
+             caf::timespan delay, F&& f) {
+  auto run = [self, start, delay, f = std::forward<F>(f)]() mutable {
+    std::invoke(f);
+    loop_at(self, start + delay, delay, std::move(f));
+  };
+  self->delay_until_fn(start + delay, std::move(run));
+}
+
+template <class F>
+void loop(caf::scheduled_actor* self, caf::timespan delay, F&& f) {
+  loop_at(self, self->clock().now() + delay, delay, std::forward<F>(f));
+}
 
 using namespace std::chrono_literals;
 using namespace si_literals;
@@ -113,6 +132,15 @@ struct exec_node_diagnostic_handler final : public diagnostic_handler {
   void emit(diagnostic diag) override {
     TENZIR_TRACE("{} {} emits diagnostic: {:?}", *state.self, state.op->name(),
                  diag);
+    switch (state.op->strictness()) {
+      case strictness_level::strict:
+        if (diag.severity == severity::warning) {
+          diag.severity = severity::error;
+        }
+        break;
+      case strictness_level::normal:
+        break;
+    }
     if (diag.severity == severity::error) {
       throw std::move(diag);
     }
@@ -145,6 +173,10 @@ struct exec_node_control_plane final : public operator_control_plane {
 
   auto self() noexcept -> exec_node_actor::base& override {
     return *state.self;
+  }
+
+  auto definition() const noexcept -> std::string_view override {
+    return state.definition;
   }
 
   auto run_id() const noexcept -> uuid override {
@@ -195,6 +227,180 @@ struct exec_node_control_plane final : public operator_control_plane {
     }
   }
 
+  struct located_resolved_secret {
+    ecc::cleansing_blob value;
+    location loc;
+
+    located_resolved_secret(location loc) : loc{loc} {
+    }
+  };
+
+  using request_map_t
+    = std::unordered_map<std::string, located_resolved_secret>;
+
+  struct secret_finisher {
+    class secret secret;
+    resolved_secret_value& out;
+    location loc;
+
+    void finish(const request_map_t& requested) const {
+      auto res = ecc::cleansing_blob{};
+      auto temp_blob = ecc::cleansing_blob{};
+      // For every element in the original secret
+      for (const auto& e : *secret.buffer->elements()) {
+        const auto name = e->name()->string_view();
+        const auto ops = e->operations()->string_view();
+        const auto is_literal = e->is_literal();
+        if (is_literal) {
+          // If it is a literal secret, we copy its name into a temporary blob.
+          temp_blob.assign(
+            reinterpret_cast<const std::byte*>(name.data()),
+            reinterpret_cast<const std::byte*>(name.data() + name.size()));
+        } else {
+          // If it is managed, get the value from the requested ones.
+          // Inside of this finisher, we know that all requests gave back values.
+          const auto it = requested.find(std::string{name});
+          TENZIR_ASSERT(it != requested.end());
+          temp_blob = it->second.value;
+        }
+        // Now we perform all operations for this secret element
+        if (not ops.empty()) {
+          for (const auto& op : detail::split(ops, ";")) {
+            if (op == "decode_base64") {
+              auto decoded = detail::base64::decode(std::string_view{
+                reinterpret_cast<const char*>(temp_blob.data()),
+                reinterpret_cast<const char*>(temp_blob.data()
+                                              + temp_blob.size()),
+              });
+              temp_blob.assign(
+                reinterpret_cast<const std::byte*>(decoded.data()),
+                reinterpret_cast<const std::byte*>(decoded.data()
+                                                   + decoded.size()));
+              continue;
+            }
+            if (op == "encode_base64") {
+              auto encoded = detail::base64::encode(std::string_view{
+                reinterpret_cast<const char*>(temp_blob.data()),
+                reinterpret_cast<const char*>(temp_blob.data()
+                                              + temp_blob.size()),
+              });
+              temp_blob.assign(
+                reinterpret_cast<const std::byte*>(encoded.data()),
+                reinterpret_cast<const std::byte*>(encoded.data()
+                                                   + encoded.size()));
+              continue;
+            }
+            // Handle trailing semicolon
+            if (op.empty()) {
+              break;
+            }
+            // Any operation we enable on secret elements must be implemented here
+            TENZIR_UNREACHABLE();
+          }
+        }
+        // We append the resolved & transformed element to the final result.
+        res.insert(res.end(), temp_blob.begin(), temp_blob.end());
+      }
+      // Finally, we make the result available to the original requests
+      // out-parameter.
+      out = resolved_secret_value{std::move(res)};
+    }
+  };
+
+  virtual auto resolve_secrets_must_yield(std::vector<secret_request> requests)
+    -> void override {
+    auto requested_secrets = std::make_shared<request_map_t>();
+    auto finishers = std::vector<secret_finisher>{};
+    for (auto& req : requests) {
+      for (const auto& element : *req.secret.buffer->elements()) {
+        const auto name = element->name()->string_view();
+        const auto is_literal = element->is_literal();
+        if (not is_literal) {
+          requested_secrets->try_emplace(std::string{name}, req.loc);
+        }
+      }
+      finishers.emplace_back(std::move(req.secret), req.out, req.loc);
+    }
+    if (requested_secrets->empty()) {
+      for (const auto& f : finishers) {
+        f.finish(*requested_secrets);
+      }
+      return;
+    }
+    auto callback = [this, finishers = std::move(finishers),
+                     requested_secrets = std::move(requested_secrets)](
+                      caf::expected<node_actor> maybe_actor) {
+      if (not maybe_actor) {
+        diagnostic::error("no Tenzir Node to resolve secrets")
+          .primary(finishers.front().loc)
+          .emit(diagnostics());
+        return;
+      }
+      // FIXME: Is this actually threadsafe the way we use it? The counter
+      // itself certainly is not.
+      auto fan = detail::make_fanout_counter_with_error<diagnostic>(
+        requested_secrets->size(),
+        [this, requested_secrets, finishers = std::move(finishers)]() {
+          for (const auto& f : finishers) {
+            f.finish(*requested_secrets);
+          }
+          set_waiting(false);
+        },
+        [this](std::span<diagnostic> diags) {
+          for (auto& d : diags) {
+            diagnostics().emit(std::move(d));
+          }
+          set_waiting(false);
+        });
+      for (auto& [name, out] : *requested_secrets) {
+        auto key_pair = ecc::generate_keypair();
+        TENZIR_ASSERT(key_pair);
+        auto public_key = key_pair->public_key;
+        state.self->mail(atom::resolve_v, name, std::move(public_key))
+          .request(*maybe_actor, caf::infinite)
+          .then(
+            [fan, keys = *key_pair, name, &out](secret_resolution_result res) {
+              match(
+                res,
+                [&](const encrypted_secret_value& v) {
+                  auto decrypted = ecc::decrypt(v.value, keys);
+                  if (not decrypted) {
+                    fan->receive_error(
+                      diagnostic::error("failed to decrypt secret: {}",
+                                        decrypted.error())
+                        .primary(out.loc)
+                        .note("secret `{}` failed", name)
+                        .done());
+                    return;
+                  }
+                  out.value = std::move(*decrypted);
+                  fan->receive_success();
+                  return;
+                },
+                [&](const secret_resolution_error& e) {
+                  fan->receive_error(
+                    diagnostic::error("could not get secret value: {}",
+                                      e.message)
+                      .primary(out.loc)
+                      .note("secret `{}` failed", name)
+                      .done());
+                });
+            },
+            [fan, loc = out.loc](caf::error e) {
+              fan->receive_error(
+                diagnostic::error(std::move(e)).primary(loc).done());
+            });
+      }
+    };
+    set_waiting(true);
+    auto node = this->node();
+    if (node) {
+      callback(node);
+      return;
+    }
+    connect_to_node(state.self, std::move(callback));
+  }
+
   exec_node_state<Input, Output>& state;
   std::unique_ptr<exec_node_diagnostic_handler<Input, Output>> diagnostic_handler
     = {};
@@ -207,11 +413,12 @@ struct exec_node_control_plane final : public operator_control_plane {
 template <class Input, class Output>
 struct exec_node_state {
   exec_node_state(exec_node_actor::pointer self, operator_ptr op,
-                  const node_actor& node,
+                  std::string definition, const node_actor& node,
                   const receiver_actor<diagnostic>& diagnostic_handler,
                   const metrics_receiver_actor& metrics_receiver, int index,
                   bool has_terminal, bool is_hidden, uuid run_id)
     : self{self},
+      definition{std::move(definition)},
       run_id{run_id},
       op{std::move(op)},
       metrics_receiver{metrics_receiver} {
@@ -319,10 +526,6 @@ struct exec_node_state {
         return error;
       });
     return {
-      [this](atom::internal, atom::run) -> caf::result<void> {
-        auto time_scheduled_guard = make_timer_guard(metrics.time_scheduled);
-        return internal_run();
-      },
       [this](atom::start,
              std::vector<caf::actor>& all_previous) -> caf::result<void> {
         auto time_scheduled_guard
@@ -386,6 +589,9 @@ struct exec_node_state {
   /// A pointer to the parent actor.
   exec_node_actor::pointer self = {};
 
+  /// The definition of this pipeline.
+  std::string definition;
+
   /// A unique identifier for the current run.
   uuid run_id = {};
 
@@ -418,6 +624,9 @@ struct exec_node_state {
 
   /// A handle to the previous execution node.
   exec_node_actor previous = {};
+
+  /// Whether the previous execution node exited.
+  caf::actor_addr prev_addr = nullptr;
 
   /// The inbound buffer.
   std::deque<Input> inbound_buffer = {};
@@ -490,7 +699,7 @@ struct exec_node_state {
 
   auto start(std::vector<caf::actor> all_previous) -> caf::result<void> {
     TENZIR_DEBUG("{} {} received start request", *self, op->name());
-    detail::weak_run_delayed_loop(self, defaults::metrics_interval, [this] {
+    loop(self, defaults::metrics_interval, [this] {
       auto time_scheduled_guard = make_timer_guard(metrics.time_scheduled);
       emit_generic_op_metrics();
     });
@@ -515,6 +724,7 @@ struct exec_node_state {
       }
       previous
         = caf::actor_cast<exec_node_actor>(std::move(all_previous.back()));
+      prev_addr = previous->address();
       all_previous.pop_back();
       self->link_to(previous);
     }
@@ -760,19 +970,17 @@ struct exec_node_state {
     TENZIR_TRACE("{} {} schedules run with a delay of {}", *self, op->name(),
                  data{backoff});
     run_scheduled = true;
-    if (backoff == duration::zero()) {
-      self->mail(atom::internal_v, atom::run_v).send(self);
-    } else {
-      backoff_disposable = detail::weak_run_delayed(self, backoff, [this] {
-        self->mail(atom::internal_v, atom::run_v).send(self);
+    if (use_backoff) {
+      backoff_disposable = self->run_delayed_weak(backoff, [this] {
+        run_scheduled = false;
+        run();
       });
+      return;
     }
-  }
-
-  auto internal_run() -> caf::result<void> {
-    run_scheduled = false;
-    run();
-    return {};
+    self->delay_fn([this] {
+      run_scheduled = false;
+      run();
+    });
   }
 
   auto issue_demand() -> void {
@@ -925,10 +1133,15 @@ struct exec_node_state {
       on_error(msg.reason);
       return;
     } else {
-      if (not previous) {
+      if (not previous and msg.source == prev_addr) {
+        // Ignore duplicate exit message from the previous node.
+        // For some reason, we can get multiple exit messages from the previous
+        // exec node. This can cause the current operator to ungracefully quit.
+        //
+        // We ignore this because we should only get exit messages from the exec
+        // nodes from the `linked` state.
         return;
       }
-      const auto prev_addr = previous->address();
       // We got an exit message, which can mean one of four things:
       // 1. The pipeline manager quit.
       // 2. The next operator quit.
@@ -936,7 +1149,7 @@ struct exec_node_state {
       // 4. The previous operator quit ungracefully.
       // In cases (1-3) we need to shut down this operator unconditionally.
       // For (4) we we need to treat the previous operator as offline.
-      if (msg.source != prev_addr) {
+      if (not previous or msg.source != prev_addr) {
         TENZIR_DEBUG("{} {} got exit message from the next execution node or "
                      "its executor with address {}: {}",
                      *self, op->name(), msg.source, msg.reason);
@@ -959,15 +1172,15 @@ struct exec_node_state {
 } // namespace
 
 auto spawn_exec_node(caf::scheduled_actor* self, operator_ptr op,
-                     operator_type input_type, node_actor node,
+                     operator_type input_type, std::string definition,
+                     node_actor node,
                      receiver_actor<diagnostic> diagnostics_handler,
                      metrics_receiver_actor metrics_receiver, int index,
                      bool has_terminal, bool is_hidden, uuid run_id)
   -> caf::expected<std::pair<exec_node_actor, operator_type>> {
   TENZIR_ASSERT(self);
   TENZIR_ASSERT(op != nullptr);
-  TENZIR_ASSERT(node != nullptr
-                or not (op->location() == operator_location::remote));
+  TENZIR_ASSERT(node != nullptr or op->location() != operator_location::remote);
   TENZIR_ASSERT(diagnostics_handler != nullptr);
   TENZIR_ASSERT(metrics_receiver != nullptr);
   auto output_type = op->infer_type(input_type);
@@ -985,8 +1198,9 @@ auto spawn_exec_node(caf::scheduled_actor* self, operator_ptr op,
         = std::conditional_t<std::is_void_v<Output>, std::monostate, Output>;
       auto result = self->spawn<SpawnOptions>(
         caf::actor_from_state<exec_node_state<input_type, output_type>>,
-        std::move(op), std::move(node), std::move(diagnostics_handler),
-        std::move(metrics_receiver), index, has_terminal, is_hidden, run_id);
+        std::move(op), std::move(definition), std::move(node),
+        std::move(diagnostics_handler), std::move(metrics_receiver), index,
+        has_terminal, is_hidden, run_id);
       return result;
     };
   };

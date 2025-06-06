@@ -54,16 +54,16 @@ struct arguments {
   std::optional<located<std::string>> primary = std::nullopt;
   ssl_options ssl = {};
 
-  static auto
-  try_parse(std::string operator_name, operator_factory_plugin::invocation inv,
-            session ctx) -> failure_or<arguments> {
+  static auto try_parse(std::string operator_name,
+                        operator_factory_plugin::invocation inv, session ctx)
+    -> failure_or<arguments> {
     auto res = arguments{inv.self.get_location()};
     auto mode_str = located<std::string>{
       to_string(mode::create_append),
       res.operator_location,
     };
     auto port = std::optional<located<int64_t>>{};
-    auto primary_selector = std::optional<ast::simple_selector>{};
+    auto primary_selector = std::optional<ast::field_path>{};
     auto parser = argument_parser2::operator_(operator_name);
     parser.named_optional("host", res.host);
     parser.named("port", port);
@@ -101,7 +101,7 @@ struct arguments {
           .emit(ctx);
         return failure::promise();
       }
-      res.primary = {p.front().name, primary_selector->get_location()};
+      res.primary = {p.front().id.name, primary_selector->get_location()};
       if (not validate_identifier(res.primary->inner)) {
         emit_invalid_identifier("primary", res.primary->inner,
                                 res.primary->source, ctx);
@@ -110,7 +110,7 @@ struct arguments {
     }
     TRY(res.ssl.validate(res.host, ctx));
     if (not port) {
-      if (res.ssl.tls.inner) {
+      if (res.ssl.get_tls().inner) {
         port = located{9440, res.operator_location};
       } else {
         port = located{9000, res.operator_location};
@@ -125,7 +125,7 @@ struct arguments {
                   .SetEndpoints({{host.inner, port.inner}})
                   .SetUser(user.inner)
                   .SetPassword(password.inner);
-    if (ssl.tls.inner) {
+    if (ssl.get_tls().inner) {
       auto tls_opts = ::clickhouse::ClientOptions::SSLOptions{};
       tls_opts.SetSkipVerification(ssl.skip_peer_verification.has_value());
       auto commands

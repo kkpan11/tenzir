@@ -9,6 +9,7 @@
 #pragma once
 
 #include "tenzir/arrow_table_slice.hpp"
+#include "tenzir/arrow_utils.hpp"
 #include "tenzir/offset.hpp"
 #include "tenzir/type.hpp"
 
@@ -33,13 +34,13 @@ struct basic_series {
   explicit basic_series(const table_slice& slice)
     requires(std::same_as<Type, type>)
     : type{slice.schema()},
-      array{to_record_batch(slice)->ToStructArray().ValueOrDie()} {
+      array{check(to_record_batch(slice)->ToStructArray())} {
   }
 
   explicit basic_series(const table_slice& slice)
     requires(std::same_as<Type, record_type>)
     : type{as<record_type>(slice.schema())},
-      array{to_record_batch(slice)->ToStructArray().ValueOrDie()} {
+      array{check(to_record_batch(slice)->ToStructArray())} {
   }
 
   basic_series(table_slice slice, offset idx)
@@ -49,9 +50,17 @@ struct basic_series {
   }
 
   template <class Other>
-    requires(std::same_as<Type, type> || std::same_as<Other, Type>)
+    requires(not std::same_as<Other, class tenzir::type>)
   basic_series(Other type, std::shared_ptr<type_to_arrow_array_t<Type>> array)
     : type{std::move(type)}, array{std::move(array)} {
+  }
+
+  basic_series(class type type,
+               std::shared_ptr<type_to_arrow_array_t<class type>> array)
+    : type{std::move(type)}, array{std::move(array)} {
+    TENZIR_ASSERT_EXPENSIVE(not this->array
+                            or this->type.to_arrow_type()->id()
+                                 == this->array->type_id());
   }
 
   // TODO: std::get_if, etc.
@@ -86,7 +95,7 @@ struct basic_series {
     (void)b->AppendNulls(length);
     return {std::move(ty),
             std::static_pointer_cast<type_to_arrow_array_t<Other>>(
-              b->Finish().ValueOrDie())};
+              check(b->Finish()))};
   }
 
   template <class Inspector>
