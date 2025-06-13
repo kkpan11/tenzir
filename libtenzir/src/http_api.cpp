@@ -184,6 +184,10 @@ auto parse_endpoint_parameters(const tenzir::rest_endpoint& endpoint,
           }
           return param_data;
         },
+        [&](const secret_type&) -> caf::expected<data> {
+          return caf::make_error(ec::invalid_argument,
+                                 "secret parameters are not supported");
+        },
         [&](const blob_type&) -> caf::expected<data> {
           return caf::make_error(ec::invalid_argument,
                                  "blob parameters are not supported");
@@ -219,6 +223,10 @@ auto parse_endpoint_parameters(const tenzir::rest_endpoint& endpoint,
                 [&](const blob_type&) -> caf::expected<data> {
                   return caf::make_error(ec::invalid_argument,
                                          "blob parameters are not supported");
+                },
+                [&](const secret_type&) -> caf::expected<data> {
+                  return caf::make_error(ec::invalid_argument,
+                                         "secret parameters are not supported");
                 },
                 [&]<basic_type Type>(const Type&) -> caf::expected<data> {
                   using data_t = type_to_data_t<Type>;
@@ -312,7 +320,10 @@ rest_response::rest_response(const tenzir::record& data)
 }
 
 auto rest_response::from_json_string(std::string json) -> rest_response {
-  TENZIR_ASSERT_EXPENSIVE(validate_json(json));
+  if (not validate_json(json)) {
+    TENZIR_ERROR("got invalid JSON in REST response");
+    return rest_response::make_error(500, "got invalid JSON");
+  }
   auto result = rest_response{};
   result.code_ = 200;
   result.body_ = std::move(json);

@@ -6,15 +6,15 @@
 // SPDX-FileCopyrightText: (c) 2024 The Tenzir Contributors
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <tenzir/arrow_table_slice.hpp>
-#include <tenzir/arrow_utils.hpp>
-#include <tenzir/checked_math.hpp>
-#include <tenzir/collect.hpp>
-#include <tenzir/detail/enumerate.hpp>
-#include <tenzir/detail/zip_iterator.hpp>
-#include <tenzir/multi_series_builder.hpp>
-#include <tenzir/series_builder.hpp>
-#include <tenzir/tql2/eval_impl.hpp>
+#include "tenzir/tql2/eval_impl.hpp"
+
+#include "tenzir/arrow_table_slice.hpp"
+#include "tenzir/arrow_utils.hpp"
+#include "tenzir/detail/enumerate.hpp"
+#include "tenzir/detail/zip_iterator.hpp"
+#include "tenzir/series_builder.hpp"
+#include "tenzir/to_string.hpp"
+#include "tenzir/view3.hpp"
 
 #include <ranges>
 
@@ -173,8 +173,8 @@ auto evaluator::eval(const ast::field_access& x) -> multi_series {
     if (auto null = l.as<null_type>()) {
       if (not x.suppress_warnings()) {
         diagnostic::warning("tried to access field of `null`")
-          .primary(x.left)
-          .secondary(x.dot, "use the `.?` operator to suppress this warning")
+          .primary(x.name)
+          .hint("append `?` to suppress this warning")
           .emit(ctx_);
       }
       return std::move(*null);
@@ -188,23 +188,27 @@ auto evaluator::eval(const ast::field_access& x) -> multi_series {
       return null();
     }
     auto& s = as<arrow::StructArray>(*l.array);
-    for (auto [i, field] : detail::enumerate<int>(rec_ty->fields())) {
-      if (field.name == x.name.name) {
-        auto has_null = s.null_count() != 0;
-        if (has_null and not x.suppress_warnings()) {
-          diagnostic::warning("tried to access field of `null`")
-            .primary(x.name)
-            .secondary(x.dot, "use the `.?` operator to suppress this warning")
-            .emit(ctx_);
-          return series{field.type, check(s.GetFlattenedField(i))};
-        }
-        return series{field.type, s.field(i)};
+    if (auto idx = rec_ty->resolve_field(x.name.name)) {
+      const auto has_null = s.null_count() != 0;
+      if (has_null and not x.suppress_warnings()) {
+        diagnostic::warning("tried to access field of `null`")
+          .primary(x.name)
+          .hint("append `?` to suppress this warning")
+          .emit(ctx_);
+        return series{
+          rec_ty->field(*idx).type,
+          check(s.GetFlattenedField(detail::narrow<int>(*idx))),
+        };
       }
+      return series{
+        rec_ty->field(*idx).type,
+        s.field(detail::narrow<int>(*idx)),
+      };
     }
     if (not x.suppress_warnings()) {
       diagnostic::warning("record does not have this field")
         .primary(x.name)
-        .secondary(x.dot, "use the `.?` operator to suppress this warning")
+        .hint("append `?` to suppress this warning")
         .emit(ctx_);
     }
     return null();
@@ -227,22 +231,24 @@ auto evaluator::eval(const ast::function_call& x) -> multi_series {
 
 auto evaluator::eval(const ast::this_& x) -> multi_series {
   auto& input = input_or_throw(x);
-  return series{input.schema(),
-                to_record_batch(input)->ToStructArray().ValueOrDie()};
+  return series{input.schema(), check(to_record_batch(input)->ToStructArray())};
 }
 
 auto evaluator::eval(const ast::root_field& x) -> multi_series {
-  auto& input = input_or_throw(x);
-  auto& rec_ty = as<record_type>(input.schema());
-  for (auto [i, field] : detail::enumerate<int>(rec_ty.fields())) {
-    if (field.name == x.ident.name) {
-      // TODO: Is this correct?
-      return series{field.type, to_record_batch(input)->column(i)};
-    }
+  const auto& input = input_or_throw(x);
+  const auto& rec_ty = as<record_type>(input.schema());
+  if (auto idx = rec_ty.resolve_field(x.id.name)) {
+    return series{
+      rec_ty.field(*idx).type,
+      to_record_batch(input)->column(detail::narrow<int>(*idx)),
+    };
   }
-  diagnostic::warning("field `{}` not found", x.ident.name)
-    .primary(x.ident)
-    .emit(ctx_);
+  if (not x.has_question_mark) {
+    diagnostic::warning("field `{}` not found", x.id.name)
+      .primary(x.id)
+      .hint("append `?` to suppress this warning")
+      .emit(ctx_);
+  }
   return null();
 }
 
@@ -255,7 +261,7 @@ auto evaluator::eval(const ast::index_expr& x) -> multi_series {
       return eval(ast::field_access{
         x.expr,
         location::unknown,
-        x.suppress_warnings,
+        x.has_question_mark,
         ast::identifier{*string, constant->source},
       });
     }
@@ -263,19 +269,31 @@ auto evaluator::eval(const ast::index_expr& x) -> multi_series {
   return map_series(
     eval(x.expr), eval(x.index),
     [&](series value, const series& index) -> multi_series {
+      const auto add_suppress_hint = [&](auto diag) {
+        // The `get` function internally creates an `ast::index_expr` and
+        // evaluates it. We change the warning when it is used.
+        return std::move(diag).hint(
+          x.rbracket != location::unknown
+            ? "use `[…]?` to suppress this warning"
+            : "provide a fallback value to suppress this warning");
+      };
       TENZIR_ASSERT(value.length() == index.length());
       if (auto null = value.as<null_type>()) {
-        if (not x.suppress_warnings) {
+        if (not x.has_question_mark) {
           diagnostic::warning("tried to access field of `null`")
-            .primary(x.expr)
+            .primary(x.expr, "is null")
+            .compose(add_suppress_hint)
             .emit(ctx_);
         }
         return std::move(*null);
       }
       if (auto null = index.as<null_type>()) {
-        diagnostic::warning("cannot use `null` as index")
-          .primary(x.index)
-          .emit(ctx_);
+        if (not x.has_question_mark) {
+          diagnostic::warning("cannot use `null` as index")
+            .primary(x.index, "is null")
+            .compose(add_suppress_hint)
+            .emit(ctx_);
+        }
         return std::move(*null);
       }
       if (auto str = index.as<string_type>()) {
@@ -283,7 +301,7 @@ auto evaluator::eval(const ast::index_expr& x) -> multi_series {
         if (not ty) {
           diagnostic::warning("cannot access field of non-record type")
             .primary(x.index)
-            .secondary(x.expr, "type `{}`", value.type.kind())
+            .secondary(x.expr, "has type `{}`", value.type.kind())
             .emit(ctx_);
           return null();
         }
@@ -325,9 +343,10 @@ auto evaluator::eval(const ast::index_expr& x) -> multi_series {
             b.data(v);
           } else {
             if (std::ranges::find(not_found, name) == not_found.end()) {
-              if (not x.suppress_warnings) {
+              if (not x.has_question_mark) {
                 diagnostic::warning("record does not have field `{}`", name)
-                  .primary(x.index)
+                  .primary(x.index, "does not exist")
+                  .compose(add_suppress_hint)
                   .emit(ctx_);
               }
               not_found.emplace_back(name);
@@ -335,14 +354,16 @@ auto evaluator::eval(const ast::index_expr& x) -> multi_series {
             b.null();
           }
         }
-        if (warn_null_record and not x.suppress_warnings) {
+        if (warn_null_record and not x.has_question_mark) {
           diagnostic::warning("tried to access field of `null`")
             .primary(x.expr)
+            .compose(add_suppress_hint)
             .emit(ctx_);
         }
-        if (warn_null_index) {
+        if (warn_null_index and not x.has_question_mark) {
           diagnostic::warning("cannot use `null` as index")
-            .primary(x.index)
+            .primary(x.index, "is null")
+            .compose(add_suppress_hint)
             .emit(ctx_);
         }
         result.push_back(b.finish_assert_one_array());
@@ -395,24 +416,26 @@ auto evaluator::eval(const ast::index_expr& x) -> multi_series {
             group_offset = i;
           }
           add(group_offset, number->length());
-          if (warn_null_index and not x.suppress_warnings) {
+          if (warn_null_index and not x.has_question_mark) {
             diagnostic::warning("cannot use `null` as index")
-              .primary(x.index)
+              .primary(x.index, "is null")
+              .compose(add_suppress_hint)
               .emit(ctx_);
           }
-          if (warn_index_out_of_bounds and not x.suppress_warnings) {
+          if (warn_index_out_of_bounds and not x.has_question_mark) {
             diagnostic::warning("index out of bounds")
-              .primary(x.index)
+              .primary(x.index, "is out of bounds")
+              .compose(add_suppress_hint)
               .emit(ctx_);
           }
           return result;
         }
         auto list = value.as<list_type>();
         if (not list) {
-          if (not is<null_type>(value.type) or not x.suppress_warnings) {
-            diagnostic::warning("cannot index into `{}` with `{}`",
-                                value.type.kind(), index.type.kind())
-              .primary(x.index)
+          if (not is<null_type>(value.type) or not x.has_question_mark) {
+            diagnostic::warning("expected `record` or `list`")
+              .primary(x.expr, "has type `{}`", value.type.kind())
+              .compose(add_suppress_hint)
               .emit(ctx_);
           }
           return null();
@@ -450,19 +473,22 @@ auto evaluator::eval(const ast::index_expr& x) -> multi_series {
           check(
             append_array_slice(*b, value_type, *list_values, value_index, 1));
         }
-        if (out_of_bounds and not x.suppress_warnings) {
+        if (out_of_bounds and not x.has_question_mark) {
           diagnostic::warning("list index out of bounds")
-            .primary(x.index)
+            .primary(x.index, "is out of bounds")
+            .compose(add_suppress_hint)
             .emit(ctx_);
         }
-        if (list_null and not x.suppress_warnings) {
+        if (list_null and not x.has_question_mark) {
           diagnostic::warning("cannot index into `null`")
-            .primary(x.expr)
+            .primary(x.expr, "is null")
+            .compose(add_suppress_hint)
             .emit(ctx_);
         }
-        if (number_null) {
+        if (number_null and not x.has_question_mark) {
           diagnostic::warning("cannot use `null` as index")
-            .primary(x.index)
+            .primary(x.index, "is null")
+            .compose(add_suppress_hint)
             .emit(ctx_);
         }
         return series{value_type, finish(*b)};
@@ -499,6 +525,43 @@ auto evaluator::eval(const ast::constant& x) -> multi_series {
   return to_series(x.as_data());
 }
 
+auto evaluator::eval(const ast::format_expr& x) -> multi_series {
+  auto cols = std::vector<variant<std::string, basic_series<string_type>>>{};
+  cols.reserve(x.segments.size());
+  for (auto& s : x.segments) {
+    match(
+      s,
+      [&](const std::string& s) {
+        cols.emplace_back(s);
+      },
+      [&](const ast::format_expr::replacement& r) {
+        auto arr = cols.emplace_back(
+          to_string(eval(r.expr), r.expr.get_location(), ctx_));
+      });
+  }
+  auto b = type_to_arrow_builder_t<string_type>{};
+  check(b.Reserve(length_));
+  auto row_text = std::string{};
+  for (auto i = int64_t{0}; i < length_; ++i) {
+    for (auto& c : cols) {
+      if (auto* s = try_as<std::string>(c)) {
+        row_text.append(*s);
+      } else {
+        auto& string_series = as<basic_series<string_type>>(c);
+        auto v = view_at(*string_series.array, i);
+        if (v) {
+          row_text.append(*v);
+        } else {
+          row_text.append("null");
+        }
+      }
+    }
+    check(b.Append(row_text));
+    row_text.clear();
+  }
+  return series{string_type{}, finish(b)};
+}
+
 auto evaluator::eval(const ast::expression& x) -> multi_series {
   return x.match([&](auto& y) {
     return eval(y);
@@ -521,54 +584,8 @@ auto evaluator::input_or_throw(into_location location) -> const table_slice& {
     });
 }
 
-namespace {
-
-auto contains_extension_type(const data& x) -> bool {
-  return match(
-    x,
-    [](const record& x) {
-      for (auto& y : x) {
-        if (contains_extension_type(y.second)) {
-          return true;
-        }
-      }
-      return false;
-    },
-    [](const list& x) {
-      for (auto& y : x) {
-        if (contains_extension_type(y)) {
-          return true;
-        }
-      }
-      return false;
-    },
-    []<class T>(const T&) -> bool {
-      if constexpr (concepts::one_of<T, map, pattern>) {
-        TENZIR_UNREACHABLE();
-      } else {
-        return extension_type<data_to_type_t<T>>;
-      }
-    });
-}
-
-} // namespace
-
 auto evaluator::to_series(const data& x) const -> series {
-  if (contains_extension_type(x)) {
-    // We currently cannot convert extension types to scalars.
-    auto b = series_builder{};
-    for (auto i = int64_t{0}; i < length_; ++i) {
-      b.data(x);
-    }
-    return b.finish_assert_one_array();
-  }
-  auto b = series_builder{};
-  b.data(x);
-  auto s = b.finish_assert_one_array();
-  return series{
-    std::move(s.type),
-    check(arrow::MakeArrayFromScalar(*check(s.array->GetScalar(0)), length_)),
-  };
+  return data_to_series(x, length_);
 }
 
 } // namespace tenzir
