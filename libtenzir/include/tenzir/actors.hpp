@@ -14,6 +14,7 @@
 #include "tenzir/atoms.hpp"
 #include "tenzir/diagnostics.hpp"
 #include "tenzir/http_api.hpp"
+#include "tenzir/secret_store.hpp"
 
 #include <caf/inspector_access.hpp>
 #include <caf/io/fwd.hpp>
@@ -36,6 +37,11 @@ struct typed_actor_fwd {
 
   template <class... Gs>
   struct extend_with_helper<caf::typed_actor<Gs...>> {
+    using type = typed_actor_fwd<Fs..., Gs...>;
+  };
+
+  template <class... Gs>
+  struct extend_with_helper<caf::type_list<Gs...>> {
     using type = typed_actor_fwd<Fs..., Gs...>;
   };
 
@@ -136,12 +142,8 @@ using partition_creation_listener_actor = typed_actor_fwd<
 
 /// The CATALOG actor interface.
 using catalog_actor = typed_actor_fwd<
-  // Reinitialize the catalog from a set of partition synopses. Used at
-  // startup, so the map is expected to be huge and we use a shared_ptr
-  // to be sure it's not accidentally copied.
-  auto(atom::merge,
-       std::shared_ptr<std::unordered_map<uuid, partition_synopsis_ptr>>)
-    ->caf::result<atom::ok>,
+  // Reinitialize the catalog from a set of partition synopses.
+  auto(atom::start, std::vector<partition_synopsis_pair>)->caf::result<atom::ok>,
   // Merge a set of partition synopses.
   auto(atom::merge, std::vector<partition_synopsis_pair>)->caf::result<atom::ok>,
   // Get *ALL* partition synopses stored in the catalog, optionally filtered
@@ -299,8 +301,6 @@ using exec_node_sink_actor = caf::typed_actor<exec_node_sink_actor_traits>;
 /// The interface of a EXEC NODE actor.
 struct exec_node_actor_traits {
   using signatures = caf::type_list<
-    // Resume the internal event loop.
-    auto(atom::internal, atom::run)->caf::result<void>,
     // Start an execution node. Returns after the operator has yielded for the
     // first time.
     auto(atom::start, std::vector<caf::actor> all_previous)->caf::result<void>,
@@ -331,9 +331,9 @@ using metrics_receiver_actor = typed_actor_fwd<
 struct node_actor_traits {
   using signatures = caf::type_list<
     // Execute a REST endpoint on this node.
-    // Note that nodes connected via CAF trust each other completely,
-    // so this skips all authorization and access control mechanisms
-    // that come with HTTP(s).
+    // Note that nodes connected via CAF trust each other
+    // completely, so this skips all authorization and access
+    // control mechanisms that come with HTTP(s).
     auto(atom::proxy, http_request_description, std::string)
       ->caf::result<rest_response>,
     // Retrieve components by their label from the component registry.
@@ -343,9 +343,13 @@ struct node_actor_traits {
     auto(atom::get, atom::version)->caf::result<record>,
     // Spawn a set of execution nodes for a given pipeline. Does not start the
     // execution nodes.
-    auto(atom::spawn, operator_box, operator_type, receiver_actor<diagnostic>,
-         metrics_receiver_actor, int index, bool is_hidden, uuid run_id)
-      ->caf::result<exec_node_actor>>;
+    auto(atom::spawn, operator_box, operator_type, std::string definition,
+         receiver_actor<diagnostic>, metrics_receiver_actor, int index,
+         bool is_hidden, uuid run_id)
+      ->caf::result<exec_node_actor>>
+    // Enable secret resolution through the node actor. It will first check the
+    // node config and then dispatch to the platform actor if necessary/possible.
+    ::append_from<secret_store_actor_traits::signatures>;
 };
 using node_actor = caf::typed_actor<node_actor_traits>;
 

@@ -4,7 +4,6 @@
     lib,
     stdenv,
     callPackage,
-    pname,
     tenzir-source,
     cmake,
     ninja,
@@ -19,6 +18,7 @@
     arrow-adbc-cpp,
     aws-sdk-cpp-tenzir,
     azure-sdk-for-cpp,
+    libbacktrace,
     clickhouse-cpp,
     fast-float,
     flatbuffers,
@@ -44,11 +44,14 @@
     restinio,
     llhttp,
     pfs,
+    # Defaults to null because it is omitted for the developer edition build.
+    tenzir-plugins-source ? null,
     extraPlugins ? [],
     symlinkJoin,
     extraCmakeFlags ? [],
     python3,
     uv,
+    uv-bin,
     pkgsBuildHost,
     makeBinaryWrapper,
     isReleaseBuild ? false,
@@ -95,9 +98,73 @@
           python-box
           pip
         ]);
+
+    allPlugins = callPackage ./plugins {
+      tenzir = self;
+      inherit tenzir-plugins-source;
+    };
+
+    withTenzirPluginsStatic =
+      selection:
+      let
+        layerPlugins = selection allPlugins;
+        final = (self.override {
+          extraPlugins = extraPlugins ++ map (x: x.src) layerPlugins;
+        }).overrideAttrs (prevAttrs: {
+          passthru = prevAttrs.passthru // {
+            asImage = toImage {
+              pkg = final;
+              plugins = [];
+            };
+          };
+        });
+      in
+        final;
+
+    withTenzirPlugins =
+      { prevLayer }:
+      selection:
+      let
+        layerPlugins = selection allPlugins;
+        thisLayer = symlinkJoin {
+          inherit (self)
+            meta
+            pname
+            version
+            name
+            ;
+          paths = [
+            self
+          ] ++ builtins.sort (lhs: rhs: lhs.name < rhs.name) (builtins.concatLists thisLayer.plugins);
+          nativeBuildInputs = [ makeBinaryWrapper ];
+          postBuild = ''
+            rm $out/bin/tenzir
+            makeWrapper ${lib.getExe self} $out/bin/tenzir \
+              --inherit-argv0 \
+              --set-default TENZIR_RUNTIME_PREFIX $out
+          '';
+
+          passthru = self.passthru // {
+            plugins = prevLayer.plugins ++ [ layerPlugins ];
+            withPlugins = withTenzirPlugins { prevLayer = thisLayer; };
+
+            asImage = toImage {
+              pkg = self;
+              plugins = prevLayer.plugins ++ [ layerPlugins ];
+            };
+          };
+        };
+      in
+      thisLayer;
+
+      toImage = pkgsBuildHost.callPackage ./image.nix {
+        inherit isStatic;
+      };
+
   in
     stdenv.mkDerivation (finalAttrs: ({
-        inherit pname version;
+        inherit version;
+        pname = "tenzir";
         src = tenzir-source;
 
         postUnpack = ''
@@ -127,15 +194,12 @@
         propagatedNativeBuildInputs = [pkg-config];
         buildInputs = [
           aws-sdk-cpp-tenzir
+          libbacktrace
           clickhouse-cpp
           fast-float
           fluent-bit
-          google-cloud-cpp
-          grpc
           libpcap
           libunwind
-          libyamlcpp
-          protobuf
           rabbitmq-c
           rdkafka
           cppzmq
@@ -156,7 +220,11 @@
           caf
           curl
           flatbuffers
+          google-cloud-cpp
+          grpc
           libmaxminddb
+          libyamlcpp
+          protobuf
           re2
           robin-map
           simdjson
@@ -175,7 +243,6 @@
           [
             "-DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON"
             "-DCAF_ROOT_DIR=${caf}"
-            "-DTENZIR_EDITION_NAME=${lib.toUpper pname}"
             "-DTENZIR_ENABLE_RELOCATABLE_INSTALLATIONS=ON"
             "-DTENZIR_ENABLE_JEMALLOC=${lib.boolToString isMusl}"
             "-DTENZIR_ENABLE_MANPAGES=OFF"
@@ -205,7 +272,7 @@
             "-DCMAKE_INSTALL_PREFIX=/opt/tenzir"
             "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION:BOOL=ON"
             "-DCPACK_GENERATOR=${if stdenv.hostPlatform.isDarwin then "TGZ;productbuild" else "TGZ;DEB;RPM"}"
-            "-DTENZIR_UV_PATH:STRING=${lib.getExe uv}"
+            "-DTENZIR_UV_PATH:STRING=${lib.getExe uv-bin}"
             "-DTENZIR_ENABLE_STATIC_EXECUTABLE:BOOL=ON"
             "-DTENZIR_PACKAGE_FILE_NAME_SUFFIX=static"
           ]
@@ -317,21 +384,18 @@
         '';
 
         passthru = {
-          plugins = bundledPlugins ++ extraPlugins;
-          withPlugins = selection: let
-            allPlugins = callPackage ./plugins {tenzir = self;};
-            actualPlugins = selection allPlugins;
-          in
-            if isStatic
-            then
-              self.override {
-                extraPlugins = map (x: x.src) actualPlugins;
-              }
-            else
-              symlinkJoin {
-                inherit (self) passthru meta pname version name;
-                paths = [ self ] ++ actualPlugins;
-              };
+          plugins = [];
+          withPlugins = if isStatic then
+            withTenzirPluginsStatic
+          else
+            withTenzirPlugins {
+              prevLayer = self;
+            };
+
+          asImage = toImage {
+            pkg = self;
+            plugins = [];
+          };
         };
 
         meta = with lib; {
@@ -374,6 +438,9 @@
           tar -xf package/*.tar.gz --strip-components=2 -C $out
 
           runHook postInstall
+        '';
+        postFixup = ''
+          rm -rf $out/nix-support
         '';
       }));
   self' = callPackage pkgFun ({self = self';} // args);

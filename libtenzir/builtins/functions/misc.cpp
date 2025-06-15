@@ -13,6 +13,7 @@
 #include <tenzir/tql2/eval.hpp>
 #include <tenzir/tql2/plugin.hpp>
 
+#include <boost/process/v2/environment.hpp>
 #if __has_include(<boost/process/v1/environment.hpp>)
 #  include <boost/process/v1/environment.hpp>
 #else
@@ -29,6 +30,10 @@ class type_id final : public function_plugin {
 public:
   auto name() const -> std::string override {
     return "tql2.type_id";
+  }
+
+  auto is_deterministic() const -> bool override {
+    return true;
   }
 
   auto make_function(invocation inv, session ctx) const
@@ -62,6 +67,10 @@ public:
     return "type_of";
   }
 
+  auto is_deterministic() const -> bool override {
+    return true;
+  }
+
   auto make_function(invocation inv, session ctx) const
     -> failure_or<function_ptr> override {
     auto expr = ast::expression{};
@@ -83,84 +92,6 @@ public:
   }
 };
 
-class secret final : public function_plugin {
-public:
-  auto name() const -> std::string override {
-    return "tql2.secret";
-  }
-
-  auto initialize(const record& plugin_config, const record& global_config)
-    -> caf::error override {
-    TENZIR_UNUSED(plugin_config);
-    auto secrets = try_get_or(global_config, "tenzir.secrets", record{});
-    if (not secrets) {
-      return diagnostic::error(secrets.error())
-        .note("configuration key `tenzir.secrets` must be a record")
-        .to_error();
-    }
-    for (const auto& [key, value] : *secrets) {
-      const auto* str = try_as<std::string>(&value);
-      if (not str) {
-        return diagnostic::error("secrets must be strings")
-          .note("configuration key `tenzir.secrets.{}` is of type `{}`", key,
-                type::infer(value).value_or(type{}).kind())
-          .to_error();
-      }
-      secrets_.emplace(key, *str);
-    }
-    return {};
-  }
-
-  auto make_function(invocation inv, session ctx) const
-    -> failure_or<function_ptr> override {
-    auto expr = ast::expression{};
-    TRY(argument_parser2::function("secret")
-          .positional("key", expr, "string")
-          .parse(inv, ctx));
-    return function_use::make(
-      [this, expr = std::move(expr)](evaluator eval, session ctx) -> series {
-        auto b = arrow::StringBuilder{};
-        check(b.Reserve(eval.length()));
-        for (auto& value : eval(expr)) {
-          auto f = detail::overload{
-            [&](const arrow::StringArray& array) {
-              for (auto i = int64_t{0}; i < array.length(); ++i) {
-                if (array.IsNull(i)) {
-                  check(b.AppendNull());
-                  continue;
-                }
-                const auto it = secrets_.find(array.GetView(i));
-                if (it == secrets_.end()) {
-                  diagnostic::warning("unknown secret `{}`", array.GetView(i))
-                    .primary(expr)
-                    .emit(ctx);
-                  check(b.AppendNull());
-                  continue;
-                }
-                check(b.Append(it->second));
-              }
-            },
-            [&](const arrow::NullArray&) {
-              check(b.AppendNulls(value.length()));
-            },
-            [&](const auto&) {
-              diagnostic::warning("expected `string`, got `{}`",
-                                  value.type.kind())
-                .primary(expr)
-                .emit(ctx);
-              check(b.AppendNulls(value.length()));
-            },
-          };
-          match(*value.array, f);
-        }
-        return series{string_type{}, finish(b)};
-      });
-  }
-
-private:
-  detail::heterogeneous_string_hashmap<std::string> secrets_ = {};
-};
-
 class env final : public function_plugin {
 public:
   auto name() const -> std::string override {
@@ -175,6 +106,10 @@ public:
       env_.emplace(entry.get_name(), entry.to_string());
     }
     return {};
+  }
+
+  auto is_deterministic() const -> bool override {
+    return true;
   }
 
   auto make_function(invocation inv, session ctx) const
@@ -254,6 +189,10 @@ public:
     return "length";
   }
 
+  auto is_deterministic() const -> bool override {
+    return true;
+  }
+
   auto make_function(invocation inv, session ctx) const
     -> failure_or<function_ptr> override {
     auto expr = ast::expression{};
@@ -301,6 +240,10 @@ class network final : public function_plugin {
 public:
   auto name() const -> std::string override {
     return "network";
+  }
+
+  auto is_deterministic() const -> bool override {
+    return true;
   }
 
   auto make_function(invocation inv, session ctx) const
@@ -352,6 +295,10 @@ class has final : public function_plugin {
 public:
   auto name() const -> std::string override {
     return "has";
+  }
+
+  auto is_deterministic() const -> bool override {
+    return true;
   }
 
   auto make_function(invocation inv, session ctx) const
@@ -452,6 +399,60 @@ public:
   }
 };
 
+class keys final : public function_plugin {
+public:
+  auto name() const -> std::string override {
+    return "keys";
+  }
+
+  auto is_deterministic() const -> bool override {
+    return true;
+  }
+
+  auto make_function(invocation inv, session ctx) const
+    -> failure_or<function_ptr> override {
+    auto expr = ast::expression{};
+    TRY(argument_parser2::function(name())
+          .positional("x", expr, "record")
+          .parse(inv, ctx));
+    return function_use::make(
+      [expr = std::move(expr)](evaluator eval, session ctx) -> multi_series {
+        const auto result_type = list_type{string_type{}};
+        return map_series(eval(expr), [&](auto&& subject) -> series {
+          return match(
+            subject.type,
+            [&](const null_type&) {
+              return series::null(result_type, eval.length());
+            },
+            [&](const record_type& type) {
+              auto keys_builder = arrow::StringBuilder{};
+              check(keys_builder.Reserve(
+                detail::narrow<int64_t>(type.num_fields())));
+              for (const auto& field : type.fields()) {
+                check(keys_builder.Append(field.name));
+              }
+              return series{
+                result_type,
+                check(arrow::MakeArrayFromScalar(
+                  arrow::ListScalar{
+                    finish(keys_builder),
+                    result_type.to_arrow_type(),
+                  },
+                  eval.length())),
+              };
+            },
+            [&](const auto&) {
+              diagnostic::warning("expected `record`, got `{}`",
+                                  subject.type.kind())
+                .primary(expr)
+                .emit(ctx);
+              return series::null(result_type, eval.length());
+            });
+        });
+      });
+  }
+};
+
 class select_drop_matching final : public function_plugin {
 public:
   explicit select_drop_matching(bool select) : select_{select} {
@@ -459,6 +460,10 @@ public:
 
   auto name() const -> std::string override {
     return select_ ? "select_matching" : "drop_matching";
+  }
+
+  auto is_deterministic() const -> bool override {
+    return true;
   }
 
   auto make_function(invocation inv, session ctx) const
@@ -519,6 +524,10 @@ public:
     return "merge";
   }
 
+  auto is_deterministic() const -> bool override {
+    return true;
+  }
+
   auto make_function(invocation inv, session ctx) const
     -> failure_or<function_ptr> override {
     auto record1 = ast::expression{};
@@ -552,6 +561,10 @@ class get final : public function_plugin {
 public:
   auto name() const -> std::string override {
     return "get";
+  }
+
+  auto is_deterministic() const -> bool override {
+    return true;
   }
 
   auto make_function(invocation inv, session ctx) const
@@ -599,11 +612,11 @@ public:
 
 TENZIR_REGISTER_PLUGIN(tenzir::plugins::misc::type_id)
 TENZIR_REGISTER_PLUGIN(tenzir::plugins::misc::type_of)
-TENZIR_REGISTER_PLUGIN(tenzir::plugins::misc::secret)
 TENZIR_REGISTER_PLUGIN(tenzir::plugins::misc::env)
 TENZIR_REGISTER_PLUGIN(tenzir::plugins::misc::length)
 TENZIR_REGISTER_PLUGIN(tenzir::plugins::misc::network)
 TENZIR_REGISTER_PLUGIN(tenzir::plugins::misc::has)
+TENZIR_REGISTER_PLUGIN(tenzir::plugins::misc::keys)
 TENZIR_REGISTER_PLUGIN(tenzir::plugins::misc::merge)
 TENZIR_REGISTER_PLUGIN(tenzir::plugins::misc::get)
 TENZIR_REGISTER_PLUGIN(tenzir::plugins::misc::select_drop_matching{true})

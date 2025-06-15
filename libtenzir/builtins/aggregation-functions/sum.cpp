@@ -37,7 +37,7 @@ private:
     if (is<caf::none_t>(view)) {
       return;
     }
-    if (!sum_) {
+    if (! sum_) {
       sum_ = materialize(as<view_type>(view));
     } else {
       sum_ = *sum_ + materialize(as<view_type>(view));
@@ -298,6 +298,13 @@ class plugin : public virtual aggregation_function_plugin,
                                            "support type {}",
                                            type));
       },
+      [](const secret_type& type)
+        -> caf::expected<std::unique_ptr<aggregation_function>> {
+        return caf::make_error(ec::invalid_configuration,
+                               fmt::format("sum aggregation function does not "
+                                           "support type {}",
+                                           type));
+      },
       []<complex_type Type>(const Type& type)
         -> caf::expected<std::unique_ptr<aggregation_function>> {
         return caf::make_error(ec::invalid_configuration,
@@ -311,6 +318,10 @@ class plugin : public virtual aggregation_function_plugin,
 
   auto aggregation_default() const -> data override {
     return caf::none;
+  }
+
+  auto is_deterministic() const -> bool override {
+    return true;
   }
 
   auto make_aggregation(invocation inv, session ctx) const

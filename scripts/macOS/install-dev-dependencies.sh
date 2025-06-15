@@ -7,6 +7,7 @@ brew install --overwrite \
     apache-arrow \
     aws-sdk-cpp \
     bash \
+    bats \
     boost \
     ccache \
     coreutils \
@@ -33,6 +34,7 @@ brew install --overwrite \
     socat \
     spdlog \
     tcpdump \
+    uv \
     xxhash \
     yaml-cpp \
     yara \
